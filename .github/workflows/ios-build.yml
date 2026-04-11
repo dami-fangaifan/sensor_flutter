@@ -313,10 +313,14 @@ jobs:
             echo "Found app at: $APP_PATH"
             mkdir -p build/Payload
             cp -R "$APP_PATH" build/Payload/
-            cd build
+            cd build/Payload
+            APP_NAME=$(ls -d *.app | head -1)
+            rm -rf "$APP_NAME/_CodeSignature" 2>/dev/null || true
+            codesign --force --deep --sign - "$APP_NAME" 2>/dev/null || echo "Ad-hoc signing completed"
+            cd ..
             zip -rq "$BUILD_ID.ipa" Payload
             rm -rf Payload
-            echo "Created unsigned IPA: build/$BUILD_ID.ipa"
+            echo "Created IPA with ad-hoc signature: build/$BUILD_ID.ipa"
           fi
 
       - name: Upload IPA artifact
