@@ -164,9 +164,14 @@ jobs:
           if [ "$PROJECT_TYPE" = "flutter" ]; then
             # For Flutter, use xcodebuild directly to avoid code signing requirement
             echo "Preparing Flutter iOS build..."
+            echo "IOS_PATH=$IOS_PATH"
+            echo "Current directory: $(pwd)"
+            ls -la
             
             # Navigate to iOS directory and run pod install first
-            cd "$IOS_PATH"
+            cd ios
+            echo "After cd ios: $(pwd)"
+            ls -la
             if [ -f "Podfile" ]; then
               echo "Running pod install..."
               pod install
@@ -176,7 +181,6 @@ jobs:
             WORKSPACE="Runner.xcworkspace"
             if [ ! -d "$WORKSPACE" ]; then
               echo "Error: $WORKSPACE not found"
-              ls -la
               exit 1
             fi
             echo "Found workspace: $WORKSPACE"
