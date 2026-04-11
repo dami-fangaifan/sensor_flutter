@@ -1,0 +1,15 @@
+{
+  "project": "sensor_flutter",
+  "platform": "ios",
+  "github": {
+    "owner": "dami-fangaifan",
+    "repo": "sensor_flutter"
+  },
+  "ios": {},
+  "flutter": {
+    "version": "3.41.6",
+    "watch": {}
+  },
+  "reactNative": {},
+  "mobai": {}
+}
