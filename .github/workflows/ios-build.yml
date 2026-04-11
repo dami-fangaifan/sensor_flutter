@@ -172,10 +172,11 @@ jobs:
               pod install
             fi
             
-            # Find workspace (just the filename, not the path)
-            WORKSPACE=$(ls *.xcworkspace 2>/dev/null | head -1)
-            if [ -z "$WORKSPACE" ]; then
-              echo "Error: No .xcworkspace found"
+            # Flutter projects use Runner.xcworkspace by default
+            WORKSPACE="Runner.xcworkspace"
+            if [ ! -d "$WORKSPACE" ]; then
+              echo "Error: $WORKSPACE not found"
+              ls -la
               exit 1
             fi
             echo "Found workspace: $WORKSPACE"
