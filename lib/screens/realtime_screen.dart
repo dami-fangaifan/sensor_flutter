@@ -310,9 +310,9 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
 
     return LineChart(
       LineChartData(
-        gridData: FlGridData(
+        gridData: const FlGridData(
           show: true,
-          gridVerticalData: FlGridData(show: false),
+          drawVerticalLine: false,
         ),
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),

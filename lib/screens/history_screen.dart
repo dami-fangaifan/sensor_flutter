@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -379,9 +380,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return LineChart(
       LineChartData(
-        gridData: FlGridData(
+        gridData: const FlGridData(
           show: true,
-          gridVerticalData: FlGridData(show: false),
+          drawVerticalLine: false,
         ),
         titlesData: FlTitlesData(
           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -398,7 +399,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               },
             ),
           ),
-          bottomTitles: AxisAxes(
+          bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 30,
@@ -406,7 +407,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 final index = value.toInt();
                 if (index >= 0 && index < _dataList.length) {
                   // 每隔一定间隔显示一个标签
-                  final interval = (_dataList.length / 5).floor().max(1);
+                  final interval = max((_dataList.length / 5).floor(), 1);
                   if (index % interval == 0) {
                     return Text(
                       _dataList[index].formattedTime.substring(0, 5),
