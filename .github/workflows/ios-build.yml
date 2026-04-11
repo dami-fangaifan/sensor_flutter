@@ -172,15 +172,18 @@ jobs:
               pod install
             fi
             
-            # Find workspace
-            WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
+            # Find workspace (just the filename, not the path)
+            WORKSPACE=$(ls *.xcworkspace 2>/dev/null | head -1)
+            if [ -z "$WORKSPACE" ]; then
+              echo "Error: No .xcworkspace found"
+              exit 1
+            fi
+            echo "Found workspace: $WORKSPACE"
             SCHEME="Runner"
             
-            cd "${GITHUB_WORKSPACE}"
-            
-            # Use xcodebuild directly with CODE_SIGNING_ALLOWED=NO
+            # Use xcodebuild directly with CODE_SIGNING_ALLOWED=NO (already in iOS directory)
             echo "Building Flutter iOS ($CONFIGURATION) without code signing..."
-            xcodebuild -workspace "$IOS_PATH/$WORKSPACE" \
+            xcodebuild -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
               -configuration "$CONFIGURATION" \
               -destination 'generic/platform=iOS' \
