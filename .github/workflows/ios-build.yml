@@ -184,17 +184,19 @@ jobs:
             echo "Found workspace: $WORKSPACE"
             SCHEME="Runner"
             
-            # Use xcodebuild directly with CODE_SIGNING_ALLOWED=NO (already in iOS directory)
-            echo "Building Flutter iOS ($CONFIGURATION) without code signing..."
+            # Use xcodebuild archive to create a proper xcarchive
+            echo "Archiving Flutter iOS ($CONFIGURATION)..."
             xcodebuild -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
               -configuration "$CONFIGURATION" \
               -destination 'generic/platform=iOS' \
-              -derivedDataPath "$DERIVED_DATA_PATH" \
+              -archivePath "${GITHUB_WORKSPACE}/build/Runner.xcarchive" \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_REQUIRED=NO \
               CODE_SIGNING_ALLOWED=NO \
               COMPILER_INDEX_STORE_ENABLE=NO \
               ONLY_ACTIVE_ARCH=YES \
-              -quiet build
+              -quiet archive
           else
             # For React Native/Expo/Native, navigate to iOS project directory first
             cd "$IOS_PATH"
@@ -282,45 +284,62 @@ jobs:
 
           # Create IPA
           cd "${GITHUB_WORKSPACE}"
+          
+          # Create ExportOptions.plist for ad-hoc export
+          cat > ExportOptions.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>ad-hoc</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string></string>
+              <key>provisioningProfiles</key>
+              <dict/>
+          </dict>
+          </plist>
+          EOF
+          
           if [ "$USE_SIGNING" = "true" ]; then
-            printf '%s\n' \
-              '<?xml version="1.0" encoding="UTF-8"?>' \
-              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-              '<plist version="1.0">' \
-              '<dict>' \
-              '    <key>method</key>' \
-              '    <string>development</string>' \
-              '    <key>signingStyle</key>' \
-              '    <string>automatic</string>' \
-              '</dict>' \
-              '</plist>' > ExportOptions.plist
             xcodebuild -exportArchive \
-              -archivePath build/App.xcarchive \
+              -archivePath build/Runner.xcarchive \
               -exportOptionsPlist ExportOptions.plist \
               -exportPath build/export
 
             mv build/export/*.ipa "build/$BUILD_ID.ipa"
             echo "Created signed IPA: build/$BUILD_ID.ipa"
           else
-            # For unsigned builds, find .app and create IPA
-            # All project types now use DerivedData
-            APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
-
-            if [ -z "$APP_PATH" ]; then
-              echo "Error: Could not find .app"
-              exit 1
+            # Export ad-hoc IPA (compatible with Sideloadly)
+            echo "Exporting ad-hoc IPA..."
+            xcodebuild -exportArchive \
+              -archivePath build/Runner.xcarchive \
+              -exportOptionsPlist ExportOptions.plist \
+              -exportPath build/export || {
+                echo "ExportArchive failed, trying alternative method..."
+                # Fallback: create IPA manually from xcarchive
+                APP_PATH="build/Runner.xcarchive/Products/Applications/Runner.app"
+                if [ -d "$APP_PATH" ]; then
+                  mkdir -p build/Payload
+                  cp -R "$APP_PATH" build/Payload/
+                  cd build
+                  zip -rq "$BUILD_ID.ipa" Payload
+                  rm -rf Payload
+                  echo "Created IPA from archive: build/$BUILD_ID.ipa"
+                else
+                  echo "Error: Could not find Runner.app in archive"
+                  exit 1
+                fi
+              }
+            
+            if [ -f "build/export/*.ipa" ]; then
+              mv build/export/*.ipa "build/$BUILD_ID.ipa"
+              echo "Created ad-hoc IPA: build/$BUILD_ID.ipa"
             fi
-            echo "Found app at: $APP_PATH"
-            mkdir -p build/Payload
-            cp -R "$APP_PATH" build/Payload/
-            cd build/Payload
-            APP_NAME=$(ls -d *.app | head -1)
-            rm -rf "$APP_NAME/_CodeSignature" 2>/dev/null || true
-            codesign --force --deep --sign - "$APP_NAME" 2>/dev/null || echo "Ad-hoc signing completed"
-            cd ..
-            zip -rq "$BUILD_ID.ipa" Payload
-            rm -rf Payload
-            echo "Created IPA with ad-hoc signature: build/$BUILD_ID.ipa"
           fi
 
       - name: Upload IPA artifact
