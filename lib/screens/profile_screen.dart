@@ -3,6 +3,7 @@ import '../services/session_service.dart';
 import '../models/patient_model.dart';
 import 'add_patient_screen.dart';
 import 'login_screen.dart';
+import 'qr_login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -216,6 +217,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Card(
               child: Column(
                 children: [
+                  // 扫码登录网页端
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF5E9ED6).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.qr_code_scanner, color: Color(0xFF5E9ED6)),
+                    ),
+                    title: const Text('扫码登录网页端'),
+                    subtitle: const Text('扫描网页端二维码快速登录'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const QrLoginScreen()),
+                      );
+                    },
+                  ),
+                  const Divider(height: 1),
                   ListTile(
                     leading: const Icon(Icons.info_outline),
                     title: const Text('关于'),

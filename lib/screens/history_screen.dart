@@ -19,6 +19,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _selectedSensor = 'sensor1';
   List<PatientModel> _patients = [];
   List<DataModel> _dataList = [];
+  List<DataModel> _displayData = [];
   bool _isLoading = false;
   
   DateTime _startDate = DateTime.now();
@@ -27,6 +28,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   TimeOfDay _endTime = TimeOfDay.now();
   
   int _sensorCount = 3;
+  
+  // 图表控制
+  final int _maxDisplayPoints = 100;
+  int _displayPointCount = 50;
+  double _minY = 0;
+  double _maxY = 100;
+  double _chartOffset = 0; // 滑动偏移
+  
+  // 统计数据
+  double _avgValue = 0;
+  double _maxValue = 0;
+  double _minValue = 0;
+  int _dataPointCount = 0;
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
   final _timeFormat = DateFormat('HH:mm');
@@ -121,10 +135,45 @@ class _HistoryScreenState extends State<HistoryScreen> {
         _isLoading = false;
         if (response.status == 'success') {
           _dataList = response.data;
+          _dataPointCount = _dataList.length;
+          _chartOffset = 0;
+          _calculateStatistics();
+          _updateDisplayData();
         } else {
           _dataList = [];
+          _displayData = [];
         }
       });
+    }
+  }
+  
+  void _calculateStatistics() {
+    if (_dataList.isEmpty) return;
+    
+    final values = _dataList.map((d) => d.value).toList();
+    _avgValue = values.reduce((a, b) => a + b) / values.length;
+    _maxValue = values.reduce(max);
+    _minValue = values.reduce(min);
+    
+    _minY = (_minValue - 5).clamp(0, double.infinity);
+    _maxY = _maxValue + 5;
+  }
+  
+  void _updateDisplayData() {
+    if (_dataList.isEmpty) {
+      _displayData = [];
+      return;
+    }
+    
+    if (_dataList.length <= _displayPointCount) {
+      _displayData = _dataList;
+    } else {
+      final startIdx = _chartOffset.toInt();
+      var endIdx = startIdx + _displayPointCount;
+      if (endIdx > _dataList.length) {
+        endIdx = _dataList.length;
+      }
+      _displayData = _dataList.sublist(startIdx, endIdx);
     }
   }
 
@@ -149,15 +198,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
             // 患者信息卡片
             _buildPatientCard(),
             const SizedBox(height: 12),
-            
+
             // 时间选择卡片
             _buildTimeRangeCard(),
             const SizedBox(height: 12),
-            
+
             // 图表卡片
             _buildChartCard(),
             const SizedBox(height: 12),
-            
+
             // 数据分析卡片
             _buildAnalysisCard(),
           ],
@@ -178,7 +227,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            
+
             Row(
               children: [
                 Expanded(
@@ -199,6 +248,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       setState(() {
                         _selectedPatient = value;
                         _dataList = [];
+                        _displayData = [];
                         if (value != null) {
                           final patient = _patients.firstWhere((p) => p.name == value);
                           _sensorCount = patient.sensorCount;
@@ -255,7 +305,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            
+
             // 快捷按钮
             Row(
               children: [
@@ -282,7 +332,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            
+
             // 开始时间
             Row(
               children: [
@@ -303,7 +353,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            
+
             // 结束时间
             Row(
               children: [
@@ -324,7 +374,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            
+
             // 查询按钮
             SizedBox(
               width: double.infinity,
@@ -354,11 +404,98 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '数据图表',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '数据图表',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                if (_dataList.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '共 $_dataPointCount 个数据点',
+                      style: TextStyle(fontSize: 12, color: Colors.blue[700]),
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            
+            // 显示点数控制
+            if (_selectedPatient != null && _dataList.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    const Text('显示点数: ', style: TextStyle(fontSize: 12)),
+                    Expanded(
+                      child: Slider(
+                        value: _displayPointCount.toDouble(),
+                        min: 20,
+                        max: _maxDisplayPoints.toDouble(),
+                        divisions: 4,
+                        label: '$_displayPointCount',
+                        onChanged: (value) {
+                          setState(() {
+                            _displayPointCount = value.toInt();
+                            _updateDisplayData();
+                          });
+                        },
+                      ),
+                    ),
+                    Text('$_displayPointCount', style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+              
+            // 滑动控制（当数据量大时）
+            if (_dataList.length > _displayPointCount)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.chevron_left),
+                      onPressed: _chartOffset > 0
+                          ? () {
+                              setState(() {
+                                _chartOffset = max(0, _chartOffset - _displayPointCount / 2);
+                                _updateDisplayData();
+                              });
+                            }
+                          : null,
+                    ),
+                    Expanded(
+                      child: Text(
+                        '显示 ${_chartOffset.toInt() + 1} - ${min(_chartOffset.toInt() + _displayPointCount, _dataList.length)} 条',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.chevron_right),
+                      onPressed: _chartOffset + _displayPointCount < _dataList.length
+                          ? () {
+                              setState(() {
+                                _chartOffset = min(
+                                  _dataList.length - _displayPointCount.toDouble(),
+                                  _chartOffset + _displayPointCount / 2,
+                                );
+                                _updateDisplayData();
+                              });
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+            
             SizedBox(
               height: 280,
               child: _selectedPatient == null
@@ -374,66 +511,139 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildLineChart() {
-    final spots = _dataList.asMap().entries.map((e) {
+    final spots = _displayData.asMap().entries.map((e) {
       return FlSpot(e.key.toDouble(), e.value.value);
     }).toList();
 
-    return LineChart(
-      LineChartData(
-        gridData: const FlGridData(
-          show: true,
-          drawVerticalLine: false,
-        ),
-        titlesData: FlTitlesData(
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 40,
-              getTitlesWidget: (value, meta) {
-                return Text(
-                  value.toStringAsFixed(1),
-                  style: const TextStyle(fontSize: 10),
-                );
-              },
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        if (details.primaryVelocity == null) return;
+        
+        if (details.primaryVelocity! > 0 && _chartOffset > 0) {
+          // 向右滑动 - 显示更早的数据
+          setState(() {
+            _chartOffset = max(0, _chartOffset - _displayPointCount / 3);
+            _updateDisplayData();
+          });
+        } else if (details.primaryVelocity! < 0 && _chartOffset + _displayPointCount < _dataList.length) {
+          // 向左滑动 - 显示更新的数据
+          setState(() {
+            _chartOffset = min(
+              _dataList.length - _displayPointCount.toDouble(),
+              _chartOffset + _displayPointCount / 3,
+            );
+            _updateDisplayData();
+          });
+        }
+      },
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: true,
+            verticalInterval: max(1, _displayData.length / 5),
+            horizontalInterval: max(1, (_maxY - _minY) / 5),
+            getDrawingHorizontalLine: (value) {
+              return FlLine(
+                color: Colors.grey[300]!,
+                strokeWidth: 1,
+              );
+            },
+            getDrawingVerticalLine: (value) {
+              return FlLine(
+                color: Colors.grey[200]!,
+                strokeWidth: 1,
+              );
+            },
+          ),
+          titlesData: FlTitlesData(
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 45,
+                getTitlesWidget: (value, meta) {
+                  return Text(
+                    value.toStringAsFixed(1),
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  );
+                },
+              ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 35,
+                interval: max(1, _displayData.length / 5),
+                getTitlesWidget: (value, meta) {
+                  final index = value.toInt();
+                  if (index >= 0 && index < _displayData.length) {
+                    final showLabel = index == 0 || 
+                        index == _displayData.length - 1 ||
+                        index % max(1, (_displayData.length / 5).floor()) == 0;
+                    if (showLabel) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _displayData[index].formattedTime.substring(0, 5),
+                          style: const TextStyle(fontSize: 9, color: Colors.grey),
+                        ),
+                      );
+                    }
+                  }
+                  return const SizedBox();
+                },
+              ),
             ),
           ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 30,
-              getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-                if (index >= 0 && index < _dataList.length) {
-                  // 每隔一定间隔显示一个标签
-                  final interval = max((_dataList.length / 5).floor(), 1);
-                  if (index % interval == 0) {
-                    return Text(
-                      _dataList[index].formattedTime.substring(0, 5),
-                      style: const TextStyle(fontSize: 8),
+          borderData: FlBorderData(show: false),
+          minX: 0,
+          maxX: (_displayData.length - 1).toDouble().clamp(0, double.infinity),
+          minY: _minY,
+          maxY: _maxY,
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              color: const Color(0xFF5E9ED6),
+              barWidth: 2.5,
+              dotData: FlDotData(
+                show: _displayData.length <= 30,
+                getDotPainter: (spot, percent, barData, index) {
+                  return FlDotCirclePainter(
+                    radius: 3,
+                    color: const Color(0xFF5E9ED6),
+                    strokeWidth: 1,
+                    strokeColor: Colors.white,
+                  );
+                },
+              ),
+              belowBarData: BarAreaData(
+                show: true,
+                color: const Color(0xFF5E9ED6).withOpacity(0.15),
+              ),
+            ),
+          ],
+          lineTouchData: LineTouchData(
+            enabled: true,
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipItems: (touchedSpots) {
+                return touchedSpots.map((spot) {
+                  final index = spot.x.toInt();
+                  if (index >= 0 && index < _displayData.length) {
+                    final data = _displayData[index];
+                    return LineTooltipItem(
+                      '${data.formattedTime}\n${data.value.toStringAsFixed(2)} kPa',
+                      const TextStyle(color: Colors.white, fontSize: 11),
                     );
                   }
-                }
-                return const SizedBox();
+                  return null;
+                }).toList();
               },
             ),
           ),
         ),
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: spots,
-            isCurved: true,
-            color: const Color(0xFF5E9ED6),
-            barWidth: 2,
-            dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(
-              show: true,
-              color: const Color(0xFF5E9ED6).withOpacity(0.1),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -469,28 +679,48 @@ class _HistoryScreenState extends State<HistoryScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                _buildStatItem('平均值', '${_avgValue.toStringAsFixed(2)} kPa', Colors.blue, Icons.analytics),
+                const SizedBox(width: 12),
+                _buildStatItem('最大值', '${_maxValue.toStringAsFixed(2)} kPa', Colors.green, Icons.arrow_upward),
+                const SizedBox(width: 12),
+                _buildStatItem('最小值', '${_minValue.toStringAsFixed(2)} kPa', Colors.orange, Icons.arrow_downward),
+              ],
+            ),
+            const SizedBox(height: 12),
             Container(
-              height: 80,
-              alignment: Alignment.center,
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    '正在开发中...',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[600],
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.grey[600], size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '数据波动范围: ${(_maxValue - _minValue).toStringAsFixed(2)} kPa',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '更多数据分析功能即将上线',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time, color: Colors.grey[600], size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '查询时间范围: ${_dateFormat.format(_startDate)} ${_startTime.format(context)} - ${_dateFormat.format(_endDate)} ${_endTime.format(context)}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -500,8 +730,34 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
   }
-}
-
-extension on int {
-  int get max => this;
+  
+  Widget _buildStatItem(String label, String value, Color color, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            Text(
+              label,
+              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
