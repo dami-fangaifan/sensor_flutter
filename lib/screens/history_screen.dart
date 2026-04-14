@@ -458,14 +458,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }).toList();
 
     return InteractiveViewer(
-      boundaryConstraints: BoxConstraints(
-        minWidth: 200,
-        maxWidth: 1000,
-        minHeight: 200,
-        maxHeight: 500,
-      ),
       minScale: 0.5,
       maxScale: 3.0,
+      constrained: false,
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
