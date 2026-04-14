@@ -20,6 +20,7 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
   String _selectedSensor = 'sensor1';
   List<PatientModel> _patients = [];
   List<DataModel> _dataList = [];
+  List<DataModel> _chartData = []; // 用于图表显示的数据（采样后）
   bool _isLoading = false;
   String _currentPressure = '-- kPa';
   String _lastUpdate = '--:--:--';
@@ -29,16 +30,14 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
   Timer? _refreshTimer;
   int _sensorCount = 3;
   
-  // 图表控制
-  final int _maxDisplayPoints = 50; // 最多显示的数据点
-  int _displayPointCount = 30; // 当前显示的数据点数
+  // 图表缩放控制
   double _minY = 0;
   double _maxY = 100;
+  double _minX = 0;
+  double _maxX = 99;
   
-  // 统计数据
-  double _avgValue = 0;
-  double _maxValue = 0;
-  double _minValue = 0;
+  // 固定显示100个数据点
+  static const int _chartPointCount = 100;
   
   @override
   void initState() {
@@ -96,7 +95,7 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
           final latest = _dataList.last;
           _currentPressure = '${latest.value.toStringAsFixed(2)} kPa';
           _lastUpdate = latest.formattedTime;
-          _calculateStatistics();
+          _processChartData();
         } else {
           _currentPressure = '-- kPa';
           _dataStatus = '暂无数据';
@@ -105,17 +104,65 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
     }
   }
   
-  void _calculateStatistics() {
-    if (_dataList.isEmpty) return;
+  /// 处理图表数据：固定显示100个点，通过平均步长采样
+  void _processChartData() {
+    if (_dataList.isEmpty) {
+      _chartData = [];
+      return;
+    }
     
-    final values = _dataList.map((d) => d.value).toList();
-    _avgValue = values.reduce((a, b) => a + b) / values.length;
-    _maxValue = values.reduce(max);
-    _minValue = values.reduce(min);
+    if (_dataList.length <= _chartPointCount) {
+      // 数据不足100个，直接使用
+      _chartData = List.from(_dataList);
+    } else {
+      // 数据超过100个，通过平均步长采样
+      _chartData = _sampleData(_dataList, _chartPointCount);
+    }
     
-    // 设置Y轴范围，留出一些边距
-    _minY = (_minValue - 5).clamp(0, double.infinity);
-    _maxY = _maxValue + 5;
+    // 根据数据调整Y轴范围
+    if (_chartData.isNotEmpty) {
+      final values = _chartData.map((d) => d.value).toList();
+      _minY = (values.reduce(min) - 5).clamp(0, double.infinity);
+      _maxY = values.reduce(max) + 5;
+    }
+  }
+  
+  /// 通过平均步长采样数据
+  List<DataModel> _sampleData(List<DataModel> data, int targetCount) {
+    if (data.length <= targetCount) return data;
+    
+    final result = <DataModel>[];
+    final step = data.length / targetCount;
+    
+    for (int i = 0; i < targetCount; i++) {
+      final index = (i * step).floor();
+      if (index < data.length) {
+        result.add(data[index]);
+      }
+    }
+    
+    return result;
+  }
+  
+  /// 获取状态描述
+  String _getStatusText(double value) {
+    if (value > 15) {
+      return '高风险';
+    } else if (value > 10) {
+      return '偏高';
+    } else {
+      return '正常';
+    }
+  }
+  
+  Color _getStatusColor(double value) {
+    if (value > 15) {
+      return Colors.red;
+    } else if (value > 10) {
+      return Colors.orange;
+    } else {
+      return Colors.green;
+    }
   }
 
   @override
@@ -150,6 +197,10 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
 
             // 数据分析卡片
             _buildAnalysisCard(),
+            const SizedBox(height: 12),
+
+            // 详细数据卡片
+            _buildDetailDataCard(),
           ],
         ),
       ),
@@ -187,6 +238,7 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
                 setState(() {
                   _selectedPatient = value;
                   _dataList = [];
+                  _chartData = [];
                   _currentPressure = '-- kPa';
                   _lastUpdate = '--:--:--';
                   if (value != null) {
@@ -314,58 +366,21 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  '实时数据图表',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                if (_dataList.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '共 ${_dataList.length} 个数据点',
-                      style: TextStyle(fontSize: 12, color: Colors.blue[700]),
-                    ),
-                  ),
-              ],
+            const Text(
+              '实时数据图表',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            
-            // 显示点数控制
-            if (_selectedPatient != null && _dataList.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    const Text('显示点数: ', style: TextStyle(fontSize: 12)),
-                    Expanded(
-                      child: Slider(
-                        value: _displayPointCount.toDouble(),
-                        min: 10,
-                        max: _maxDisplayPoints.toDouble(),
-                        divisions: 4,
-                        label: '$_displayPointCount',
-                        onChanged: (value) {
-                          setState(() => _displayPointCount = value.toInt());
-                        },
-                      ),
-                    ),
-                    Text('$_displayPointCount', style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-            
+            const Text(
+              '可双指缩放查看',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
-              height: 250,
+              height: 280,
               child: _selectedPatient == null
                   ? _buildEmptyState('请选择患者', '选择患者后将显示实时数据')
-                  : _dataList.isEmpty
+                  : _chartData.isEmpty
                       ? _buildEmptyState('暂无数据', '请稍候...')
                       : _buildLineChart(),
             ),
@@ -376,124 +391,124 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
   }
 
   Widget _buildLineChart() {
-    // 取最近的N个数据点
-    final displayData = _dataList.length > _displayPointCount
-        ? _dataList.sublist(_dataList.length - _displayPointCount)
-        : _dataList;
-
-    final spots = displayData.asMap().entries.map((e) {
+    final spots = _chartData.asMap().entries.map((e) {
       return FlSpot(e.key.toDouble(), e.value.value);
     }).toList();
 
     return GestureDetector(
-      onHorizontalDragUpdate: (details) {
-        // 允许滑动查看
+      onDoubleTap: () {
+        // 双击重置缩放
+        setState(() {
+          _minX = 0;
+          _maxX = (_chartData.length - 1).toDouble();
+        });
       },
-      child: LineChart(
-        LineChartData(
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: true,
-            verticalInterval: max(1, displayData.length / 5),
-            horizontalInterval: max(1, (_maxY - _minY) / 5),
-            getDrawingHorizontalLine: (value) {
-              return FlLine(
-                color: Colors.grey[300]!,
-                strokeWidth: 1,
-              );
-            },
-            getDrawingVerticalLine: (value) {
-              return FlLine(
-                color: Colors.grey[200]!,
-                strokeWidth: 1,
-              );
-            },
-          ),
-          titlesData: FlTitlesData(
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 45,
-                getTitlesWidget: (value, meta) {
-                  return Text(
-                    value.toStringAsFixed(1),
-                    style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  );
-                },
-              ),
+      child: InteractiveViewer(
+        boundaryConstraints: BoxConstraints(
+          minWidth: 200,
+          maxWidth: 1000,
+          minHeight: 200,
+          maxHeight: 500,
+        ),
+        minScale: 0.5,
+        maxScale: 3.0,
+        child: LineChart(
+          LineChartData(
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: true,
+              verticalInterval: max(1, _chartData.length / 8),
+              horizontalInterval: max(1, (_maxY - _minY) / 6),
+              getDrawingHorizontalLine: (value) {
+                return FlLine(color: Colors.grey[300]!, strokeWidth: 1);
+              },
+              getDrawingVerticalLine: (value) {
+                return FlLine(color: Colors.grey[200]!, strokeWidth: 1);
+              },
             ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 35,
-                interval: max(1, displayData.length / 5),
-                getTitlesWidget: (value, meta) {
-                  final index = value.toInt();
-                  if (index >= 0 && index < displayData.length) {
-                    final showLabel = index == 0 || 
-                        index == displayData.length - 1 ||
-                        index % max(1, (displayData.length / 5).floor()) == 0;
-                    if (showLabel) {
+            titlesData: FlTitlesData(
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 50,
+                  getTitlesWidget: (value, meta) {
+                    return Text(
+                      value.toStringAsFixed(1),
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    );
+                  },
+                ),
+              ),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 35,
+                  interval: max(1, _chartData.length / 6),
+                  getTitlesWidget: (value, meta) {
+                    final index = value.toInt();
+                    if (index >= 0 && index < _chartData.length) {
+                      // 显示时间戳
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          displayData[index].formattedTime.substring(0, 5),
+                          _chartData[index].formattedTime.substring(0, 5),
                           style: const TextStyle(fontSize: 9, color: Colors.grey),
                         ),
                       );
                     }
-                  }
-                  return const SizedBox();
-                },
+                    return const SizedBox();
+                  },
+                ),
               ),
             ),
-          ),
-          borderData: FlBorderData(show: false),
-          minX: 0,
-          maxX: (displayData.length - 1).toDouble(),
-          minY: _minY,
-          maxY: _maxY,
-          lineBarsData: [
-            LineChartBarData(
-              spots: spots,
-              isCurved: true,
-              color: const Color(0xFF5E9ED6),
-              barWidth: 2.5,
-              dotData: FlDotData(
-                show: displayData.length <= 20,
-                getDotPainter: (spot, percent, barData, index) {
-                  return FlDotCirclePainter(
-                    radius: 3,
-                    color: const Color(0xFF5E9ED6),
-                    strokeWidth: 1,
-                    strokeColor: Colors.white,
-                  );
-                },
-              ),
-              belowBarData: BarAreaData(
-                show: true,
-                color: const Color(0xFF5E9ED6).withOpacity(0.15),
-              ),
-            ),
-          ],
-          lineTouchData: LineTouchData(
-            enabled: true,
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (touchedSpots) {
-                return touchedSpots.map((spot) {
-                  final index = spot.x.toInt();
-                  if (index >= 0 && index < displayData.length) {
-                    final data = displayData[index];
-                    return LineTooltipItem(
-                      '${data.formattedTime}\n${data.value.toStringAsFixed(2)} kPa',
-                      const TextStyle(color: Colors.white, fontSize: 11),
+            borderData: FlBorderData(show: false),
+            minX: 0,
+            maxX: (_chartData.length - 1).toDouble(),
+            minY: _minY,
+            maxY: _maxY,
+            lineBarsData: [
+              LineChartBarData(
+                spots: spots,
+                isCurved: true,
+                color: const Color(0xFF5E9ED6),
+                barWidth: 2.5,
+                dotData: FlDotData(
+                  show: _chartData.length <= 30,
+                  getDotPainter: (spot, percent, barData, index) {
+                    return FlDotCirclePainter(
+                      radius: 3,
+                      color: const Color(0xFF5E9ED6),
+                      strokeWidth: 1,
+                      strokeColor: Colors.white,
                     );
-                  }
-                  return null;
-                }).toList();
-              },
+                  },
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  color: const Color(0xFF5E9ED6).withOpacity(0.15),
+                ),
+              ),
+            ],
+            lineTouchData: LineTouchData(
+              enabled: true,
+              touchTooltipData: LineTouchTooltipData(
+                getTooltipItems: (touchedSpots) {
+                  return touchedSpots.map((spot) {
+                    final index = spot.x.toInt();
+                    if (index >= 0 && index < _chartData.length) {
+                      final data = _chartData[index];
+                      // 显示完整日期和时间
+                      return LineTooltipItem(
+                        '${data.timestamp}\n${data.value.toStringAsFixed(2)} kPa',
+                        const TextStyle(color: Colors.white, fontSize: 11),
+                      );
+                    }
+                    return null;
+                  }).toList();
+                },
+              ),
             ),
           ),
         ),
@@ -517,10 +532,6 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
   }
 
   Widget _buildAnalysisCard() {
-    if (_selectedPatient == null || _dataList.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -532,31 +543,28 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                _buildStatItem('平均值', '${_avgValue.toStringAsFixed(2)} kPa', Colors.blue, Icons.analytics),
-                const SizedBox(width: 12),
-                _buildStatItem('最大值', '${_maxValue.toStringAsFixed(2)} kPa', Colors.green, Icons.arrow_upward),
-                const SizedBox(width: 12),
-                _buildStatItem('最小值', '${_minValue.toStringAsFixed(2)} kPa', Colors.orange, Icons.arrow_downward),
-              ],
-            ),
-            const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(12),
+              height: 80,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.info_outline, color: Colors.grey[600], size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '数据波动范围: ${(_maxValue - _minValue).toStringAsFixed(2)} kPa',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  Text(
+                    '正在开发中...',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[600],
                     ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '更多数据分析功能即将上线',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                   ),
                 ],
               ),
@@ -566,33 +574,142 @@ class _RealtimeScreenState extends State<RealtimeScreen> {
       ),
     );
   }
-  
-  Widget _buildStatItem(String label, String value, Color color, IconData icon) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
+
+  Widget _buildDetailDataCard() {
+    if (_selectedPatient == null || _dataList.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    // 显示最近10条数据
+    final displayData = _dataList.length > 10 
+        ? _dataList.sublist(_dataList.length - 10) 
+        : _dataList;
+    
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: color,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '详细数据',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+                      onPressed: () {},
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+                      onPressed: () {},
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            
+            // 表头
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      '时间',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 1,
+                    child: Text(
+                      '压力值',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 1,
+                    child: Text(
+                      '状态',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                    ),
+                  ),
+                ],
               ),
             ),
-            Text(
-              label,
-              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-            ),
+            
+            // 数据列表
+            ...displayData.reversed.map((data) => _buildDataRow(data)),
           ],
         ),
+      ),
+    );
+  }
+  
+  Widget _buildDataRow(DataModel data) {
+    final statusText = _getStatusText(data.value);
+    final statusColor = _getStatusColor(data.value);
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Colors.grey[200]!, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              data.formattedTime,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              data.value.toStringAsFixed(2),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (statusText == '高风险')
+                  const Icon(Icons.warning, color: Colors.red, size: 14),
+                Text(
+                  statusText,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: statusColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
