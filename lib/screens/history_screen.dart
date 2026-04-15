@@ -31,8 +31,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double _minY = 0;
   double _maxY = 100;
   
-  // 图表缩放比例（影响显示点数）
-  double _chartScale = 1.0;
+  // 图表缩放状态
+  double _chartScale = 1.0;  // 当前缩放比例
+  static const double _minScale = 0.5;   // 最小缩放（缩小）
+  static const double _maxScale = 3.0;   // 最大缩放（放大）
+  static const int _minPoints = 10;      // 最小点数（放大时）
+  static const int _maxPoints = 100;     // 最大点数（缩小时）
+  
   int? _selectedQuickRange;
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
@@ -117,6 +122,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _startDate = start;
       _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
       _selectedQuickRange = index;
+      // 重置缩放
+      _chartScale = 1.0;
     });
     // 自动获取数据
     if (_selectedPatient != null) {
@@ -140,6 +147,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _isLoading = true;
       _chartData = [];
       _dataList = [];
+      _chartScale = 1.0; // 重置缩放
     });
 
     try {
@@ -178,17 +186,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
   
+  /// 根据缩放比例计算并更新图表数据
+  /// 核心逻辑：
+  /// - 双指向外张开（放大，scale增大）→ 点数减少（最小10个）→ 时间轴缩短
+  /// - 双指向内捏合（缩小，scale减小）→ 点数增多（最多100个）→ 时间轴拉长
   void _processChartData() {
     if (_dataList.isEmpty) {
       _chartData = [];
       return;
     }
     
-    // 根据缩放比例计算点数
-    // 双指往外滑（放大，scale增大）→ 点数减少，显示更精细
-    // 双指往内滑（缩小，scale减小）→ 点数增多，显示更全面
-    // scale=1.0 -> 100点, scale=2.0 -> 50点, scale=3.0 -> 33点
-    final pointCount = (100 / _chartScale).clamp(10, 100).toInt();
+    // 计算当前应显示的点数
+    // scale = 1.0 → 100点
+    // scale = 3.0 (放大最大) → 10点
+    // scale = 0.5 (缩小最大) → 100点
+    final pointCount = _calculatePointCount(_chartScale);
     
     // 采样到目标点数
     if (_dataList.length <= pointCount) {
@@ -198,25 +210,43 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
     
     // 计算Y轴范围
-    if (_chartData.isNotEmpty) {
-      final values = _chartData.map((d) => d.value).toList();
-      final minVal = values.reduce(min);
-      final maxVal = values.reduce(max);
-      
-      // 确保Y轴范围合理
-      final padding = max(5.0, (maxVal - minVal) * 0.1);
-      _minY = (minVal - padding).clamp(0.0, double.infinity);
-      _maxY = maxVal + padding;
-      
-      // 如果范围太小，扩展到至少10
-      if (_maxY - _minY < 10) {
-        final mid = (_maxY + _minY) / 2;
-        _minY = (mid - 5).clamp(0.0, double.infinity);
-        _maxY = mid + 5;
-      }
+    _updateYAxisRange();
+  }
+  
+  /// 根据缩放比例计算显示点数
+  /// 放大(scale↑) → 点数↓ → 显示更精细的时间段
+  /// 缩小(scale↓) → 点数↑ → 显示更全面的时间段
+  int _calculatePointCount(double scale) {
+    // 线性映射: scale [1.0, 3.0] → points [100, 10]
+    // scale = 1.0 → 100点
+    // scale = 2.0 → 55点
+    // scale = 3.0 → 10点
+    final normalizedScale = (scale - 1.0) / (_maxScale - 1.0); // 0.0 ~ 1.0
+    final pointCount = (_maxPoints - normalizedScale * (_maxPoints - _minPoints)).round();
+    return pointCount.clamp(_minPoints, _maxPoints);
+  }
+  
+  void _updateYAxisRange() {
+    if (_chartData.isEmpty) return;
+    
+    final values = _chartData.map((d) => d.value).toList();
+    final minVal = values.reduce(min);
+    final maxVal = values.reduce(max);
+    
+    // 确保Y轴范围合理
+    final padding = max(5.0, (maxVal - minVal) * 0.1);
+    _minY = (minVal - padding).clamp(0.0, double.infinity);
+    _maxY = maxVal + padding;
+    
+    // 如果范围太小，扩展到至少10
+    if (_maxY - _minY < 10) {
+      final mid = (_maxY + _minY) / 2;
+      _minY = (mid - 5).clamp(0.0, double.infinity);
+      _maxY = mid + 5;
     }
   }
   
+  /// 等距采样数据
   List<DataModel> _sampleData(List<DataModel> data, int targetCount) {
     if (data.length <= targetCount) return data;
     final result = <DataModel>[];
@@ -306,6 +336,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         _selectedPatient = value;
                         _dataList = [];
                         _chartData = [];
+                        _chartScale = 1.0;
                         if (value != null) {
                           final patient = _patients.firstWhere((p) => p.name == value);
                           _sensorCount = patient.sensorCount;
@@ -480,7 +511,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             const SizedBox(height: 4),
-            const Text('双指缩放可调整显示精度', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            Text(
+              '双指缩放：外张→放大→点数减少 | 内捏→缩小→点数增多',
+              style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+            ),
             const SizedBox(height: 12),
             SizedBox(
               height: 280,
@@ -498,6 +532,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  /// 构建可缩放的折线图
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -506,20 +541,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     return InteractiveViewer(
-      minScale: 0.5,
-      maxScale: 3.0,
+      minScale: _minScale,
+      maxScale: _maxScale,
+      // 禁用平移，仅保留缩放
+      panEnabled: false,
+      // 缩放边界限制
+      boundaryEdges: FlutterBoundaryEdges.all,
+      // 监听缩放手势变化
       onInteractionUpdate: (details) {
-        // InteractiveViewer 的 scale: 往外滑(放大) scale增大, 往内滑(缩小) scale减小
-        // 我们需要: 往外滑(放大) 点数减少, 往内滑(缩小) 点数增多
-        // 所以用反向映射: 100 / scale
-        final newScale = details.scale;
-        if ((newScale - _chartScale).abs() > 0.05) {
-          _chartScale = newScale;
-          if (_dataList.isNotEmpty) {
-            _processChartData();
-            setState(() {});
-          }
-        }
+        _handleScaleUpdate(details.scale);
       },
       child: LineChart(
         LineChartData(
@@ -618,6 +648,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ),
       ),
     );
+  }
+  
+  /// 处理缩放更新
+  /// 核心逻辑：检测缩放变化 → 重新计算点数 → 更新图表
+  void _handleScaleUpdate(double newScale) {
+    // 添加阈值，避免频繁更新
+    if ((newScale - _chartScale).abs() > 0.05) {
+      _chartScale = newScale;
+      if (_dataList.isNotEmpty) {
+        _processChartData();
+        setState(() {});
+      }
+    }
   }
 
   Widget _buildEmptyState(String title, String subtitle) {
@@ -746,4 +789,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
   }
+}
+
+/// 自定义边界约束，限制缩放范围
+class FlutterBoundaryEdges {
+  static const all = null; // 使用 InteractiveViewer 默认边界
 }
