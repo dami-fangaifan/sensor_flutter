@@ -184,8 +184,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
-    // 根据缩放比例计算点数（放大时点数减少）
-    // scale=1.0 -> 100点, scale=2.0 -> 50点, scale=0.5 -> 100点(最大)
+    // 根据缩放比例计算点数
+    // 双指往外滑（放大，scale增大）→ 点数减少，显示更精细
+    // 双指往内滑（缩小，scale减小）→ 点数增多，显示更全面
+    // scale=1.0 -> 100点, scale=2.0 -> 50点, scale=3.0 -> 33点
     final pointCount = (100 / _chartScale).clamp(10, 100).toInt();
     
     // 采样到目标点数
@@ -507,14 +509,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       minScale: 0.5,
       maxScale: 3.0,
       onInteractionUpdate: (details) {
-        // 检测缩放比例变化
-        if (details.scale != _chartScale) {
-          setState(() {
-            _chartScale = details.scale;
-          });
-          // 重新处理图表数据
+        // InteractiveViewer 的 scale: 往外滑(放大) scale增大, 往内滑(缩小) scale减小
+        // 我们需要: 往外滑(放大) 点数减少, 往内滑(缩小) 点数增多
+        // 所以用反向映射: 100 / scale
+        final newScale = details.scale;
+        if ((newScale - _chartScale).abs() > 0.05) {
+          _chartScale = newScale;
           if (_dataList.isNotEmpty) {
             _processChartData();
+            setState(() {});
           }
         }
       },
