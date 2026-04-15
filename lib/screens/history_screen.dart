@@ -31,8 +31,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double _minY = 0;
   double _maxY = 100;
   
-  // 可调节的图表点数（10-100）
-  int _chartPointCount = 100;
+  // 图表缩放比例（影响显示点数）
+  double _chartScale = 1.0;
   int? _selectedQuickRange;
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
@@ -184,11 +184,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
-    // 采样到100个点
-    if (_dataList.length <= _chartPointCount) {
+    // 根据缩放比例计算点数（放大时点数减少）
+    // scale=1.0 -> 100点, scale=2.0 -> 50点, scale=0.5 -> 100点(最大)
+    final pointCount = (100 / _chartScale).clamp(10, 100).toInt();
+    
+    // 采样到目标点数
+    if (_dataList.length <= pointCount) {
       _chartData = List.from(_dataList);
     } else {
-      _chartData = _sampleData(_dataList, _chartPointCount);
+      _chartData = _sampleData(_dataList, pointCount);
     }
     
     // 计算Y轴范围
@@ -469,37 +473,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('数据图表', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                Text('显示 $_chartPointCount 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                if (_chartData.isNotEmpty)
+                  Text('显示 ${_chartData.length} 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
               ],
             ),
             const SizedBox(height: 4),
-            const Text('可双指缩放查看', style: TextStyle(fontSize: 11, color: Colors.grey)),
-            const SizedBox(height: 8),
-            // 点数选择滑动条
-            Row(
-              children: [
-                const Text('点数: ', style: TextStyle(fontSize: 12)),
-                Expanded(
-                  child: Slider(
-                    value: _chartPointCount.toDouble(),
-                    min: 10,
-                    max: 100,
-                    divisions: 9,
-                    label: '$_chartPointCount',
-                    onChanged: (value) {
-                      setState(() {
-                        _chartPointCount = value.toInt();
-                      });
-                      // 重新处理图表数据
-                      if (_dataList.isNotEmpty) {
-                        _processChartData();
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
+            const Text('双指缩放可调整显示精度', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            const SizedBox(height: 12),
             SizedBox(
               height: 280,
               child: _selectedPatient == null
@@ -526,6 +506,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return InteractiveViewer(
       minScale: 0.5,
       maxScale: 3.0,
+      onInteractionUpdate: (details) {
+        // 检测缩放比例变化
+        if (details.scale != _chartScale) {
+          setState(() {
+            _chartScale = details.scale;
+          });
+          // 重新处理图表数据
+          if (_dataList.isNotEmpty) {
+            _processChartData();
+          }
+        }
+      },
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
