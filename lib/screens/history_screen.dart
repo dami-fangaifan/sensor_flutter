@@ -36,11 +36,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
   final _timeFormat = DateFormat('HH:mm');
+  final _dateTimeFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
 
   @override
   void initState() {
     super.initState();
     _loadPatients();
+    _setQuickRange(24 * 7, 1); // 默认显示1周数据
   }
 
   void _loadPatients() {
@@ -115,7 +117,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
       _selectedQuickRange = index;
     });
-    _fetchData();
+    // 自动获取数据
+    if (_selectedPatient != null) {
+      _fetchData();
+    }
   }
 
   String _formatDateTime(DateTime date, TimeOfDay time) {
@@ -123,31 +128,52 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _fetchData() async {
-    if (_selectedPatient == null) return;
+    if (_selectedPatient == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择患者')),
+      );
+      return;
+    }
 
     setState(() {
       _isLoading = true;
       _chartData = [];
+      _dataList = [];
     });
 
-    final response = await SensorApiService.getSensorDataByTimeRange(
-      patient: _selectedPatient!,
-      startTime: _formatDateTime(_startDate, _startTime),
-      endTime: _formatDateTime(_endDate, _endTime),
-      sensorType: _selectedSensor,
-    );
+    try {
+      final response = await SensorApiService.getSensorDataByTimeRange(
+        patient: _selectedPatient!,
+        startTime: _formatDateTime(_startDate, _startTime),
+        endTime: _formatDateTime(_endDate, _endTime),
+        sensorType: _selectedSensor,
+      );
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-        if (response.status == 'success' && response.data.isNotEmpty) {
-          _dataList = response.data;
-          _processChartData();
-        } else {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          if (response.status == 'success' && response.data.isNotEmpty) {
+            // 按时间排序
+            _dataList = response.data.toList()
+              ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            _processChartData();
+          } else {
+            _dataList = [];
+            _chartData = [];
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
           _dataList = [];
           _chartData = [];
-        }
-      });
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('获取数据失败: $e')),
+        );
+      }
     }
   }
   
@@ -157,21 +183,29 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
+    // 采样到100个点
     if (_dataList.length <= _chartPointCount) {
       _chartData = List.from(_dataList);
     } else {
       _chartData = _sampleData(_dataList, _chartPointCount);
     }
     
+    // 计算Y轴范围
     if (_chartData.isNotEmpty) {
       final values = _chartData.map((d) => d.value).toList();
       final minVal = values.reduce(min);
       final maxVal = values.reduce(max);
-      _minY = (minVal - 5).clamp(0, double.infinity);
-      _maxY = maxVal + 5;
+      
+      // 确保Y轴范围合理
+      final padding = max(5.0, (maxVal - minVal) * 0.1);
+      _minY = (minVal - padding).clamp(0.0, double.infinity);
+      _maxY = maxVal + padding;
+      
+      // 如果范围太小，扩展到至少10
       if (_maxY - _minY < 10) {
-        _minY = (_minY - 5).clamp(0, double.infinity);
-        _maxY = _maxY + 5;
+        final mid = (_maxY + _minY) / 2;
+        _minY = (mid - 5).clamp(0.0, double.infinity);
+        _maxY = mid + 5;
       }
     }
   }
@@ -208,24 +242,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
         title: const Text('历史数据'),
         actions: [
           if (_selectedPatient != null)
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchData),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _isLoading ? null : _fetchData,
+            ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildPatientCard(),
-            const SizedBox(height: 12),
-            _buildTimeRangeCard(),
-            const SizedBox(height: 12),
-            _buildChartCard(),
-            const SizedBox(height: 12),
-            _buildAnalysisCard(),
-            const SizedBox(height: 12),
-            _buildDetailDataCard(),
-          ],
+      body: RefreshIndicator(
+        onRefresh: _fetchData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildPatientCard(),
+              const SizedBox(height: 12),
+              _buildTimeRangeCard(),
+              const SizedBox(height: 12),
+              _buildChartCard(),
+              const SizedBox(height: 12),
+              _buildAnalysisCard(),
+              const SizedBox(height: 12),
+              if (_dataList.isNotEmpty) _buildDetailDataCard(),
+            ],
+          ),
         ),
       ),
     );
@@ -431,7 +472,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   Text('显示 ${_chartData.length} 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             const Text('可双指缩放查看', style: TextStyle(fontSize: 11, color: Colors.grey)),
             const SizedBox(height: 12),
             SizedBox(
@@ -451,14 +492,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildLineChart() {
-    final spots = _chartData.asMap().entries.map((e) {
-      return FlSpot(e.key.toDouble(), e.value.value);
-    }).toList();
+    // 生成数据点
+    final spots = <FlSpot>[];
+    for (int i = 0; i < _chartData.length; i++) {
+      spots.add(FlSpot(i.toDouble(), _chartData[i].value));
+    }
 
-    return InteractiveViewer(
-      minScale: 0.5,
-      maxScale: 3.0,
-      constrained: false,
+    return GestureDetector(
+      onDoubleTap: () {
+        // 双击重置缩放
+        setState(() {});
+      },
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
@@ -486,14 +530,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 35,
-                interval: max(1, _chartData.length / 6),
+                interval: max(1, _chartData.length / 5),
                 getTitlesWidget: (value, meta) {
                   final index = value.toInt();
                   if (index >= 0 && index < _chartData.length) {
+                    final time = _chartData[index].formattedTime;
                     return Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        _chartData[index].formattedTime.substring(0, 5),
+                        time.substring(0, min(5, time.length)),
                         style: const TextStyle(fontSize: 9, color: Colors.grey),
                       ),
                     );
@@ -503,15 +548,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
             ),
           ),
-          borderData: FlBorderData(show: false),
+          borderData: FlBorderData(
+            show: true,
+            border: Border.all(color: Colors.grey[300]!),
+          ),
           minX: 0,
-          maxX: (_chartData.length - 1).toDouble(),
+          maxX: (_chartData.length - 1).toDouble().clamp(0, double.infinity),
           minY: _minY,
           maxY: _maxY,
+          clipData: FlClipData.all(),
           lineBarsData: [
             LineChartBarData(
               spots: spots,
               isCurved: true,
+              curveSmoothness: 0.2,
               color: const Color(0xFF5E9ED6),
               barWidth: 2.5,
               dotData: FlDotData(
@@ -599,8 +649,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildDetailDataCard() {
-    if (_selectedPatient == null || _dataList.isEmpty) return const SizedBox.shrink();
-    
     final displayData = _dataList.length > 20 ? _dataList.sublist(_dataList.length - 20) : _dataList;
     
     return Card(
