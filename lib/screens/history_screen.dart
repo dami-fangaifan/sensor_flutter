@@ -19,7 +19,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _selectedSensor = 'sensor1';
   List<PatientModel> _patients = [];
   List<DataModel> _dataList = [];
-  List<DataModel> _chartData = []; // 用于图表显示的数据（采样后）
+  List<DataModel> _chartData = [];
   bool _isLoading = false;
   
   DateTime _startDate = DateTime.now();
@@ -28,13 +28,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
   TimeOfDay _endTime = TimeOfDay.now();
   
   int _sensorCount = 3;
-  
-  // 图表控制
   double _minY = 0;
   double _maxY = 100;
   
-  // 固定显示100个数据点
   static const int _chartPointCount = 100;
+  int? _selectedQuickRange;
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
   final _timeFormat = DateFormat('HH:mm');
@@ -59,7 +57,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       lastDate: DateTime.now(),
     );
     if (picked != null) {
-      setState(() => _startDate = picked);
+      setState(() {
+        _startDate = picked;
+        _selectedQuickRange = null;
+      });
     }
   }
 
@@ -71,7 +72,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       lastDate: DateTime.now(),
     );
     if (picked != null) {
-      setState(() => _endDate = picked);
+      setState(() {
+        _endDate = picked;
+        _selectedQuickRange = null;
+      });
     }
   }
 
@@ -81,7 +85,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
       initialTime: _startTime,
     );
     if (picked != null) {
-      setState(() => _startTime = picked);
+      setState(() {
+        _startTime = picked;
+        _selectedQuickRange = null;
+      });
     }
   }
 
@@ -91,19 +98,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
       initialTime: _endTime,
     );
     if (picked != null) {
-      setState(() => _endTime = picked);
+      setState(() {
+        _endTime = picked;
+        _selectedQuickRange = null;
+      });
     }
   }
 
-  void _setQuickRange(int hours) {
+  void _setQuickRange(int hours, int index) {
     final now = DateTime.now();
     setState(() {
       _endDate = now;
       _endTime = TimeOfDay(hour: now.hour, minute: now.minute);
-      
       final start = now.subtract(Duration(hours: hours));
       _startDate = start;
       _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
+      _selectedQuickRange = index;
     });
     _fetchData();
   }
@@ -115,7 +125,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _fetchData() async {
     if (_selectedPatient == null) return;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _chartData = [];
+    });
 
     final response = await SensorApiService.getSensorDataByTimeRange(
       patient: _selectedPatient!,
@@ -127,7 +140,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (mounted) {
       setState(() {
         _isLoading = false;
-        if (response.status == 'success') {
+        if (response.status == 'success' && response.data.isNotEmpty) {
           _dataList = response.data;
           _processChartData();
         } else {
@@ -138,7 +151,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
   
-  /// 处理图表数据：固定显示100个点，通过平均步长采样
   void _processChartData() {
     if (_dataList.isEmpty) {
       _chartData = [];
@@ -151,50 +163,42 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _chartData = _sampleData(_dataList, _chartPointCount);
     }
     
-    // 根据数据调整Y轴范围
     if (_chartData.isNotEmpty) {
       final values = _chartData.map((d) => d.value).toList();
-      _minY = (values.reduce(min) - 5).clamp(0, double.infinity);
-      _maxY = values.reduce(max) + 5;
+      final minVal = values.reduce(min);
+      final maxVal = values.reduce(max);
+      _minY = (minVal - 5).clamp(0, double.infinity);
+      _maxY = maxVal + 5;
+      if (_maxY - _minY < 10) {
+        _minY = (_minY - 5).clamp(0, double.infinity);
+        _maxY = _maxY + 5;
+      }
     }
   }
   
-  /// 通过平均步长采样数据
   List<DataModel> _sampleData(List<DataModel> data, int targetCount) {
     if (data.length <= targetCount) return data;
-    
     final result = <DataModel>[];
     final step = data.length / targetCount;
-    
     for (int i = 0; i < targetCount; i++) {
       final index = (i * step).floor();
       if (index < data.length) {
         result.add(data[index]);
       }
     }
-    
     return result;
   }
   
-  /// 获取状态描述
   String _getStatusText(double value) {
-    if (value > 15) {
-      return '高风险';
-    } else if (value > 10) {
-      return '偏高';
-    } else {
-      return '正常';
-    }
+    if (value > 15) return '高风险';
+    if (value > 10) return '偏高';
+    return '正常';
   }
   
   Color _getStatusColor(double value) {
-    if (value > 15) {
-      return Colors.red;
-    } else if (value > 10) {
-      return Colors.orange;
-    } else {
-      return Colors.green;
-    }
+    if (value > 15) return Colors.red;
+    if (value > 10) return Colors.orange;
+    return Colors.green;
   }
 
   @override
@@ -204,10 +208,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         title: const Text('历史数据'),
         actions: [
           if (_selectedPatient != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _fetchData,
-            ),
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchData),
         ],
       ),
       body: SingleChildScrollView(
@@ -215,23 +216,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 患者信息卡片
             _buildPatientCard(),
             const SizedBox(height: 12),
-
-            // 时间选择卡片
             _buildTimeRangeCard(),
             const SizedBox(height: 12),
-
-            // 图表卡片
             _buildChartCard(),
             const SizedBox(height: 12),
-
-            // 数据分析卡片
             _buildAnalysisCard(),
             const SizedBox(height: 12),
-
-            // 详细数据卡片
             _buildDetailDataCard(),
           ],
         ),
@@ -246,12 +238,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '患者信息',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            const Text('患者信息', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-
             Row(
               children: [
                 Expanded(
@@ -263,10 +251,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     ),
                     items: [
                       const DropdownMenuItem(value: null, child: Text('请选择患者')),
-                      ..._patients.map((p) => DropdownMenuItem(
-                        value: p.name,
-                        child: Text(p.name),
-                      )),
+                      ..._patients.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name))),
                     ],
                     onChanged: (value) {
                       setState(() {
@@ -278,9 +263,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           _sensorCount = patient.sensorCount;
                         }
                       });
-                      if (value != null) {
-                        _fetchData();
-                      }
+                      if (value != null) _fetchData();
                     },
                   ),
                 ),
@@ -292,19 +275,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       labelText: '测量部位',
                       border: OutlineInputBorder(),
                     ),
-                    items: List.generate(
-                      _sensorCount,
-                      (i) => DropdownMenuItem(
-                        value: 'sensor${i + 1}',
-                        child: Text('传感器 ${i + 1}'),
-                      ),
-                    ),
+                    items: List.generate(_sensorCount, (i) => DropdownMenuItem(
+                      value: 'sensor${i + 1}',
+                      child: Text('传感器 ${i + 1}'),
+                    )),
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _selectedSensor = value);
-                        if (_selectedPatient != null) {
-                          _fetchData();
-                        }
+                        if (_selectedPatient != null) _fetchData();
                       }
                     },
                   ),
@@ -324,46 +302,43 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '时间范围',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-
-            // 快捷按钮
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _setQuickRange(24),
-                    child: const Text('24小时'),
+                const Text('时间范围', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _setQuickRange(24 * 7),
-                    child: const Text('1周'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _setQuickRange(24 * 30),
-                    child: const Text('1月'),
+                  child: Text(
+                    '${_dateFormat.format(_startDate)} ${_startTime.format(context)} - ${_dateFormat.format(_endDate)} ${_endTime.format(context)}',
+                    style: TextStyle(fontSize: 10, color: Colors.blue[700]),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
-            // 开始时间
+            Row(
+              children: [
+                Expanded(child: _buildQuickButton('24小时', 0, () => _setQuickRange(24, 0))),
+                const SizedBox(width: 8),
+                Expanded(child: _buildQuickButton('1周', 1, () => _setQuickRange(24 * 7, 1))),
+                const SizedBox(width: 8),
+                Expanded(child: _buildQuickButton('1月', 2, () => _setQuickRange(24 * 30, 2))),
+              ],
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 const Text('开始：'),
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _selectStartDate,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _selectedQuickRange == null ? Colors.blue[50] : null,
+                    ),
                     child: Text(_dateFormat.format(_startDate)),
                   ),
                 ),
@@ -371,20 +346,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _selectStartTime,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _selectedQuickRange == null ? Colors.blue[50] : null,
+                    ),
                     child: Text(_startTime.format(context)),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-
-            // 结束时间
             Row(
               children: [
                 const Text('结束：'),
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _selectEndDate,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _selectedQuickRange == null ? Colors.blue[50] : null,
+                    ),
                     child: Text(_dateFormat.format(_endDate)),
                   ),
                 ),
@@ -392,25 +371,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _selectEndTime,
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: _selectedQuickRange == null ? Colors.blue[50] : null,
+                    ),
                     child: Text(_endTime.format(context)),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
-            // 查询按钮
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _selectedPatient == null || _isLoading
-                    ? null
-                    : _fetchData,
+                onPressed: _selectedPatient == null || _isLoading ? null : _fetchData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF5E9ED6),
+                  foregroundColor: Colors.white,
+                ),
                 child: _isLoading
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Text('查询数据'),
               ),
@@ -418,6 +400,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ],
         ),
       ),
+    );
+  }
+  
+  Widget _buildQuickButton(String label, int index, VoidCallback onPressed) {
+    final isSelected = _selectedQuickRange == index;
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: isSelected ? const Color(0xFF5E9ED6) : null,
+        foregroundColor: isSelected ? Colors.white : const Color(0xFF5E9ED6),
+        side: BorderSide(color: const Color(0xFF5E9ED6)),
+      ),
+      child: Text(label),
     );
   }
 
@@ -428,23 +423,26 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '数据图表',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('数据图表', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                if (_chartData.isNotEmpty)
+                  Text('显示 ${_chartData.length} 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+              ],
             ),
             const SizedBox(height: 8),
-            const Text(
-              '可双指缩放查看',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
-            ),
+            const Text('可双指缩放查看', style: TextStyle(fontSize: 11, color: Colors.grey)),
             const SizedBox(height: 12),
             SizedBox(
               height: 280,
               child: _selectedPatient == null
                   ? _buildEmptyState('请选择患者', '选择患者后将显示数据图表')
-                  : _chartData.isEmpty
-                      ? _buildEmptyState('暂无数据', '请调整时间范围后查询')
-                      : _buildLineChart(),
+                  : _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _chartData.isEmpty
+                          ? _buildEmptyState('暂无数据', '请调整时间范围后点击"查询数据"')
+                          : _buildLineChart(),
             ),
           ],
         ),
@@ -468,12 +466,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
             drawVerticalLine: true,
             verticalInterval: max(1, _chartData.length / 8),
             horizontalInterval: max(1, (_maxY - _minY) / 6),
-            getDrawingHorizontalLine: (value) {
-              return FlLine(color: Colors.grey[300]!, strokeWidth: 1);
-            },
-            getDrawingVerticalLine: (value) {
-              return FlLine(color: Colors.grey[200]!, strokeWidth: 1);
-            },
+            getDrawingHorizontalLine: (value) => FlLine(color: Colors.grey[300]!, strokeWidth: 1),
+            getDrawingVerticalLine: (value) => FlLine(color: Colors.grey[200]!, strokeWidth: 1),
           ),
           titlesData: FlTitlesData(
             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -482,12 +476,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 50,
-                getTitlesWidget: (value, meta) {
-                  return Text(
-                    value.toStringAsFixed(1),
-                    style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  );
-                },
+                getTitlesWidget: (value, meta) => Text(
+                  value.toStringAsFixed(1),
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                ),
               ),
             ),
             bottomTitles: AxisTitles(
@@ -524,14 +516,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
               barWidth: 2.5,
               dotData: FlDotData(
                 show: _chartData.length <= 30,
-                getDotPainter: (spot, percent, barData, index) {
-                  return FlDotCirclePainter(
-                    radius: 3,
-                    color: const Color(0xFF5E9ED6),
-                    strokeWidth: 1,
-                    strokeColor: Colors.white,
-                  );
-                },
+                getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
+                  radius: 3,
+                  color: const Color(0xFF5E9ED6),
+                  strokeWidth: 1,
+                  strokeColor: Colors.white,
+                ),
               ),
               belowBarData: BarAreaData(
                 show: true,
@@ -547,7 +537,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   final index = spot.x.toInt();
                   if (index >= 0 && index < _chartData.length) {
                     final data = _chartData[index];
-                    // 显示完整日期和时间
                     return LineTooltipItem(
                       '${data.timestamp}\n${data.value.toStringAsFixed(2)} kPa',
                       const TextStyle(color: Colors.white, fontSize: 11),
@@ -585,10 +574,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '数据分析',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            const Text('数据分析', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Container(
               height: 80,
@@ -600,19 +586,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    '正在开发中...',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[600],
-                    ),
-                  ),
+                  Text('正在开发中...', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey[600])),
                   const SizedBox(height: 4),
-                  Text(
-                    '更多数据分析功能即将上线',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-                  ),
+                  Text('更多数据分析功能即将上线', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
                 ],
               ),
             ),
@@ -623,14 +599,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildDetailDataCard() {
-    if (_selectedPatient == null || _dataList.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (_selectedPatient == null || _dataList.isEmpty) return const SizedBox.shrink();
     
-    // 显示最近的数据，最多显示20条
-    final displayData = _dataList.length > 20 
-        ? _dataList.sublist(_dataList.length - 20) 
-        : _dataList;
+    final displayData = _dataList.length > 20 ? _dataList.sublist(_dataList.length - 20) : _dataList;
     
     return Card(
       child: Padding(
@@ -641,10 +612,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '详细数据 (共 ${_dataList.length} 条)',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                Text('详细数据 (共 ${_dataList.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Row(
                   children: [
                     IconButton(
@@ -664,8 +632,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            
-            // 表头
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               decoration: BoxDecoration(
@@ -674,34 +640,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ),
               child: const Row(
                 children: [
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      '时间',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 1,
-                    child: Text(
-                      '压力值',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 1,
-                    child: Text(
-                      '状态',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                    ),
-                  ),
+                  Expanded(flex: 2, child: Text('时间', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
+                  Expanded(flex: 1, child: Text('压力值', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
+                  Expanded(flex: 1, child: Text('状态', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
                 ],
               ),
             ),
-            
-            // 数据列表
             ...displayData.reversed.map((data) => _buildDataRow(data)),
           ],
         ),
@@ -716,43 +660,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Colors.grey[200]!, width: 0.5),
-        ),
+        border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 0.5)),
       ),
       child: Row(
         children: [
-          Expanded(
-            flex: 2,
-            child: Text(
-              data.formattedTime,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Text(
-              data.value.toStringAsFixed(2),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-            ),
-          ),
+          Expanded(flex: 2, child: Text(data.formattedTime, style: const TextStyle(fontSize: 12))),
+          Expanded(flex: 1, child: Text(data.value.toStringAsFixed(2), textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
           Expanded(
             flex: 1,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                if (statusText == '高风险')
-                  const Icon(Icons.warning, color: Colors.red, size: 14),
-                Text(
-                  statusText,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: statusColor,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                if (statusText == '高风险') const Icon(Icons.warning, color: Colors.red, size: 14),
+                Text(statusText, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: statusColor, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
