@@ -31,7 +31,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double _minY = 0;
   double _maxY = 100;
   
-  static const int _chartPointCount = 100;
+  // 可调节的图表点数（10-100）
+  int _chartPointCount = 100;
   int? _selectedQuickRange;
   
   final _dateFormat = DateFormat('yyyy-MM-dd');
@@ -468,13 +469,37 @@ class _HistoryScreenState extends State<HistoryScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('数据图表', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                if (_chartData.isNotEmpty)
-                  Text('显示 ${_chartData.length} 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                Text('显示 $_chartPointCount 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
               ],
             ),
             const SizedBox(height: 4),
             const Text('可双指缩放查看', style: TextStyle(fontSize: 11, color: Colors.grey)),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            // 点数选择滑动条
+            Row(
+              children: [
+                const Text('点数: ', style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: Slider(
+                    value: _chartPointCount.toDouble(),
+                    min: 10,
+                    max: 100,
+                    divisions: 9,
+                    label: '$_chartPointCount',
+                    onChanged: (value) {
+                      setState(() {
+                        _chartPointCount = value.toInt();
+                      });
+                      // 重新处理图表数据
+                      if (_dataList.isNotEmpty) {
+                        _processChartData();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               height: 280,
               child: _selectedPatient == null
@@ -498,11 +523,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
 
-    return GestureDetector(
-      onDoubleTap: () {
-        // 双击重置缩放
-        setState(() {});
-      },
+    return InteractiveViewer(
+      minScale: 0.5,
+      maxScale: 3.0,
       child: LineChart(
         LineChartData(
           gridData: FlGridData(
