@@ -1,7 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/session_service.dart';
@@ -561,7 +560,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  /// 构建可缩放的折线图（使用PhotoView实现双指缩放）
+  /// 构建可缩放的折线图（使用GestureDetector + Transform.scale）
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -569,16 +568,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
 
-    return PhotoView.customChild(
-      child: Container(
-        color: Colors.white,
-        padding: const EdgeInsets.all(8),
+    return GestureDetector(
+      onScaleUpdate: (ScaleUpdateDetails details) {
+        final newScale = details.scale.clamp(_minScale, _maxScale);
+        if ((newScale - _chartScale).abs() > 0.02) {
+          setState(() {
+            _chartScale = newScale;
+          });
+        }
+      },
+      onScaleEnd: (ScaleEndDetails details) {
+        // 缩放结束，可根据需要添加逻辑
+      },
+      child: Transform.scale(
+        scale: _chartScale,
+        alignment: Alignment.center,
         child: _buildChartContent(spots),
       ),
-      minScale: _minScale,
-      maxScale: _maxScale,
-      initialScale: 1.0,
-      enableRotation: false,
     );
   }
   

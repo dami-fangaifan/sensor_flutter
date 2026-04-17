@@ -22,9 +22,6 @@ dependencies:
   # 图表
   fl_chart: ^0.66.0
   
-  # 图表缩放支持
-  photo_view: ^0.14.0
-  
   # 二维码
   qr_flutter: ^4.1.0
   mobile_scanner: ^4.0.1
