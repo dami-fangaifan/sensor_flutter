@@ -32,7 +32,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double _maxY = 100;
   
   // 采样配置
-  static const int _maxPoints = 100;     // 最大显示点数
+  static const int _minDisplayPoints = 20;  // 最小显示点数
+  static const int _maxDisplayPoints = 100; // 最大显示点数
+  int _displayPointCount = 100;             // 当前显示点数
   
   // 第一级采样后的数据（用于详细数据列表）
   List<DataModel> _firstLevelData = [];
@@ -187,7 +189,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
   
   /// 采样处理数据（参考Android实现）
-  /// API数据 -> 最多100点
   void _processChartData() {
     if (_dataList.isEmpty) {
       _chartData = [];
@@ -195,12 +196,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
-    // 采样：最多100点
-    _firstLevelData = _dataList.length <= _maxPoints 
+    // 第一级采样：最多100点
+    _firstLevelData = _dataList.length <= _maxDisplayPoints 
         ? List.from(_dataList)
-        : _sampleDataAverage(_dataList, _maxPoints);
+        : _sampleDataAverage(_dataList, _maxDisplayPoints);
     
-    _chartData = List.from(_firstLevelData);
+    // 第二级采样：根据用户选择的点数
+    if (_firstLevelData.length <= _displayPointCount) {
+      _chartData = List.from(_firstLevelData);
+    } else {
+      _chartData = _sampleDataAverage(_firstLevelData, _displayPointCount);
+    }
     
     // 计算Y轴范围
     _updateYAxisRange();
@@ -507,20 +513,47 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '显示 ${_chartData.length} / ${_firstLevelData.length} 点', 
+                      '显示 ${_chartData.length} 点', 
                       style: TextStyle(fontSize: 11, color: Colors.blue[700]),
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              '左右滑动查看图表 | 点击数据点显示详情',
-              style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+            const SizedBox(height: 8),
+            // 点数滑动选择器
+            Row(
+              children: [
+                Text('点数: ', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Expanded(
+                  child: Slider(
+                    value: _displayPointCount.toDouble(),
+                    min: _minDisplayPoints.toDouble(),
+                    max: _maxDisplayPoints.toDouble(),
+                    divisions: 16, // 20-100，每5个一档
+                    label: '$_displayPointCount',
+                    onChanged: (value) {
+                      setState(() {
+                        _displayPointCount = value.round();
+                        _selectedPointIndex = null;
+                      });
+                      if (_firstLevelData.isNotEmpty) {
+                        _processChartData();
+                      }
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 40,
+                  child: Text('$_displayPointCount', 
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue[700]),
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             SizedBox(
-              height: 280,
+              height: 250,
               child: _selectedPatient == null
                   ? _buildEmptyState('请选择患者', '选择患者后将显示数据图表')
                   : _isLoading
@@ -535,7 +568,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  /// 构建可横向滚动的折线图
+  /// 构建可横向滚动的折线图（纵轴固定）
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -543,21 +576,53 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
     
-    // 计算图表宽度：每个点30像素，最少占满屏幕
-    final chartWidth = max(350.0, _chartData.length * 30.0);
+    // 计算图表宽度：每个点15像素，最少占满屏幕
+    final chartWidth = max(300.0, _chartData.length * 15.0);
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: chartWidth,
-        height: 280,
-        child: _buildChartContent(spots),
-      ),
+    return Row(
+      children: [
+        // 固定的Y轴区域
+        SizedBox(
+          width: 50,
+          height: 250,
+          child: _buildYAxisLabels(),
+        ),
+        // 可滚动的图表内容
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: chartWidth,
+              height: 250,
+              child: _buildChartContent(spots, showYAxis: false),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+  
+  /// 构建固定的Y轴标签
+  Widget _buildYAxisLabels() {
+    final interval = max(1, (_maxY - _minY) / 5);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const SizedBox(height: 10),
+        ...List.generate(5, (index) {
+          final value = _maxY - (index + 1) * interval;
+          return Text(
+            value.toStringAsFixed(1),
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
+          );
+        }),
+        const SizedBox(height: 25),
+      ],
     );
   }
   
   /// 构建图表内容
-  Widget _buildChartContent(List<FlSpot> spots) {
+  Widget _buildChartContent(List<FlSpot> spots, {bool showYAxis = true}) {
     return LineChart(
       LineChartData(
         gridData: FlGridData(
@@ -573,12 +638,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 50,
-              getTitlesWidget: (value, meta) => Text(
-                value.toStringAsFixed(1),
-                style: const TextStyle(fontSize: 10, color: Colors.grey),
-              ),
+              showTitles: showYAxis,
+              reservedSize: showYAxis ? 50 : 0,
             ),
           ),
           bottomTitles: AxisTitles(
@@ -623,11 +684,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
               show: true,
               getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
                 radius: _selectedPointIndex == index ? 6 : 4,
+                // 白色空心点，选中时绿色填充
                 color: _selectedPointIndex == index 
                     ? const Color(0xFF27AE60) 
-                    : const Color(0xFF5E9ED6),
+                    : Colors.white,
                 strokeWidth: 2,
-                strokeColor: Colors.white,
+                strokeColor: _selectedPointIndex == index 
+                    ? const Color(0xFF27AE60) 
+                    : const Color(0xFF5E9ED6),
               ),
             ),
             belowBarData: BarAreaData(
