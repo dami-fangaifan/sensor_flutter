@@ -560,7 +560,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  /// 构建可缩放的折线图
+  /// 构建可缩放的折线图（使用GestureDetector检测双指缩放）
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -568,14 +568,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
 
-    return InteractiveViewer(
-      minScale: _minScale,
-      maxScale: _maxScale,
-      // 禁用平移，仅保留缩放
-      panEnabled: false,
-      // 监听缩放手势变化
-      onInteractionUpdate: (details) {
-        _handleScaleUpdate(details.scale);
+    return GestureDetector(
+      onScaleStart: (details) {
+        // 记录初始缩放
+      },
+      onScaleUpdate: (details) {
+        // 使用 pointers 判断是否是双指手势
+        if (details.pointerCount >= 2) {
+          final newScale = details.scale.clamp(_minScale, _maxScale);
+          if ((newScale - _chartScale).abs() > 0.05) {
+            _chartScale = newScale;
+            if (_firstLevelData.isNotEmpty) {
+              final pointCount = _calculatePointCount(_chartScale);
+              if (_firstLevelData.length <= pointCount) {
+                _chartData = List.from(_firstLevelData);
+              } else {
+                _chartData = _sampleDataAverage(_firstLevelData, pointCount);
+              }
+              _updateYAxisRange();
+              setState(() {});
+            }
+          }
+        }
+      },
+      onScaleEnd: (details) {
+        // 缩放结束
       },
       child: LineChart(
         LineChartData(
@@ -682,19 +699,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ),
       ),
     );
-  }
-  
-  /// 处理缩放更新
-  /// 核心逻辑：检测缩放变化 → 重新计算点数 → 更新图表
-  void _handleScaleUpdate(double newScale) {
-    // 添加阈值，避免频繁更新
-    if ((newScale - _chartScale).abs() > 0.05) {
-      _chartScale = newScale;
-      if (_dataList.isNotEmpty) {
-        _processChartData();
-        setState(() {});
-      }
-    }
   }
 
   Widget _buildEmptyState(String title, String subtitle) {
