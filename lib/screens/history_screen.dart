@@ -56,12 +56,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _setQuickRange(24 * 7, 1); // 默认显示1周数据
   }
 
-  @override
-  void dispose() {
-    _photoViewController.dispose();
-    super.dispose();
-  }
-
   void _loadPatients() {
     setState(() {
       _patients = SessionService.getPatients();
@@ -567,9 +561,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  // PhotoView 控制器
-  final PhotoViewController _photoViewController = PhotoViewController();
-  
   /// 构建可缩放的折线图（使用PhotoView实现双指缩放）
   Widget _buildLineChart() {
     // 生成数据点
@@ -579,30 +570,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     return PhotoView.customChild(
-      controller: _photoViewController,
       child: Container(
         color: Colors.white,
+        padding: const EdgeInsets.all(8),
         child: _buildChartContent(spots),
       ),
       minScale: _minScale,
       maxScale: _maxScale,
       initialScale: 1.0,
       enableRotation: false,
-      onScaleEnd: (context, details, controller) {
-        final newScale = controller.scale ?? 1.0;
-        _chartScale = newScale.clamp(_minScale, _maxScale);
-        
-        if (_firstLevelData.isNotEmpty) {
-          final pointCount = _calculatePointCount(_chartScale);
-          if (_firstLevelData.length <= pointCount) {
-            _chartData = List.from(_firstLevelData);
-          } else {
-            _chartData = _sampleDataAverage(_firstLevelData, pointCount);
-          }
-          _updateYAxisRange();
-          setState(() {});
-        }
-      },
     );
   }
   
