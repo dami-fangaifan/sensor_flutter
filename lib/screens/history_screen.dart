@@ -37,6 +37,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const double _maxScale = 3.0;   // 最大缩放（放大）
   static const int _minPoints = 10;      // 最小点数（放大时）
   static const int _maxPoints = 100;     // 最大点数（缩小时）
+  static const int _chartDisplayPoints = 50;  // 图表显示点数（与Android一致）
+  
+  // 第一级采样后的数据（用于详细数据列表）
+  List<DataModel> _firstLevelData = [];
   
   int? _selectedQuickRange;
   
@@ -147,6 +151,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _isLoading = true;
       _chartData = [];
       _dataList = [];
+      _firstLevelData = []; // 清空第一级采样数据
       _chartScale = 1.0; // 重置缩放
     });
 
@@ -186,27 +191,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
   
-  /// 根据缩放比例计算并更新图表数据
-  /// 核心逻辑：
-  /// - 双指向外张开（放大，scale增大）→ 点数减少（最小10个）→ 时间轴缩短
-  /// - 双指向内捏合（缩小，scale减小）→ 点数增多（最多100个）→ 时间轴拉长
+  /// 双级采样处理数据（参考Android实现）
+  /// 第一级：API数据 -> 最多100点（用于详细数据列表）
+  /// 第二级：图表显示 -> 根据缩放动态计算点数，使用平均值
   void _processChartData() {
     if (_dataList.isEmpty) {
       _chartData = [];
+      _firstLevelData = [];
       return;
     }
     
-    // 计算当前应显示的点数
-    // scale = 1.0 → 100点
-    // scale = 3.0 (放大最大) → 10点
-    // scale = 0.5 (缩小最大) → 100点
-    final pointCount = _calculatePointCount(_chartScale);
+    // 第一级采样：最多100点（用于详细列表）
+    _firstLevelData = _dataList.length <= _maxPoints 
+        ? List.from(_dataList)
+        : _sampleDataAverage(_dataList, _maxPoints);
     
-    // 采样到目标点数
-    if (_dataList.length <= pointCount) {
-      _chartData = List.from(_dataList);
+    // 第二级采样：根据缩放计算显示点数，使用平均值
+    final pointCount = _calculatePointCount(_chartScale);
+    if (_firstLevelData.length <= pointCount) {
+      _chartData = List.from(_firstLevelData);
     } else {
-      _chartData = _sampleData(_dataList, pointCount);
+      _chartData = _sampleDataAverage(_firstLevelData, pointCount);
     }
     
     // 计算Y轴范围
@@ -246,16 +251,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
   
-  /// 等距采样数据
-  List<DataModel> _sampleData(List<DataModel> data, int targetCount) {
+  /// 平均值采样数据（参考Android实现）
+  /// 将数据分成targetCount个区间，每个区间取平均值
+  List<DataModel> _sampleDataAverage(List<DataModel> data, int targetCount) {
     if (data.length <= targetCount) return data;
+    
     final result = <DataModel>[];
     final step = data.length / targetCount;
+    
     for (int i = 0; i < targetCount; i++) {
-      final index = (i * step).floor();
-      if (index < data.length) {
-        result.add(data[index]);
-      }
+      final startIndex = (i * step).floor();
+      final endIndex = min(((i + 1) * step).floor(), data.length);
+      
+      // 取区间内的平均值（参考Android实现）
+      final sublist = data.sublist(startIndex, endIndex);
+      final avgValue = sublist.map((d) => d.value).reduce((a, b) => a + b) / sublist.length;
+      
+      // 使用区间的第一个时间戳
+      result.add(DataModel(
+        timestamp: data[startIndex].timestamp,
+        value: avgValue,
+        patient: data[startIndex].patient,
+      ));
     }
     return result;
   }
@@ -301,7 +318,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               const SizedBox(height: 12),
               _buildAnalysisCard(),
               const SizedBox(height: 12),
-              if (_dataList.isNotEmpty) _buildDetailDataCard(),
+              if (_firstLevelData.isNotEmpty) _buildDetailDataCard(),
             ],
           ),
         ),
@@ -336,6 +353,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         _selectedPatient = value;
                         _dataList = [];
                         _chartData = [];
+                        _firstLevelData = []; // 清空第一级采样数据
                         _chartScale = 1.0;
                         if (value != null) {
                           final patient = _patients.firstWhere((p) => p.name == value);
@@ -507,12 +525,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
               children: [
                 const Text('数据图表', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 if (_chartData.isNotEmpty)
-                  Text('显示 ${_chartData.length} 个点', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '显示 ${_chartData.length} / ${_firstLevelData.length} 点', 
+                      style: TextStyle(fontSize: 11, color: Colors.blue[700]),
+                    ),
+                  ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              '双指缩放：外张→放大→点数减少 | 内捏→缩小→点数增多',
+              '双指缩放：外张→放大→细节 | 内捏→缩小→概览',
               style: TextStyle(fontSize: 10, color: Colors.grey[500]),
             ),
             const SizedBox(height: 12),
@@ -545,8 +573,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       maxScale: _maxScale,
       // 禁用平移，仅保留缩放
       panEnabled: false,
-      // 缩放边界限制
-      boundaryEdges: FlutterBoundaryEdges.all,
       // 监听缩放手势变化
       onInteractionUpdate: (details) {
         _handleScaleUpdate(details.scale);
@@ -608,22 +634,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
           lineBarsData: [
             LineChartBarData(
               spots: spots,
+              // 贝塞尔曲线平滑（参考Android CUBIC_BEZIER）
               isCurved: true,
-              curveSmoothness: 0.2,
+              curveSmoothness: 0.15, // 与Android cubicIntensity一致
               color: const Color(0xFF5E9ED6),
               barWidth: 2.5,
               dotData: FlDotData(
                 show: _chartData.length <= 30,
                 getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
-                  radius: 3,
+                  radius: 4,
                   color: const Color(0xFF5E9ED6),
-                  strokeWidth: 1,
+                  strokeWidth: 2,
                   strokeColor: Colors.white,
                 ),
               ),
               belowBarData: BarAreaData(
                 show: true,
-                color: const Color(0xFF5E9ED6).withOpacity(0.15),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    const Color(0xFF5E9ED6).withOpacity(0.3),
+                    const Color(0xFFB3D9F2).withOpacity(0.1),
+                  ],
+                ),
               ),
             ),
           ],
@@ -710,7 +744,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildDetailDataCard() {
-    final displayData = _dataList.length > 20 ? _dataList.sublist(_dataList.length - 20) : _dataList;
+    // 使用第一级采样数据（最多100点）显示详细列表
+    final displayData = _firstLevelData.length > 20 
+        ? _firstLevelData.sublist(_firstLevelData.length - 20) 
+        : _firstLevelData;
     
     return Card(
       child: Padding(
@@ -721,7 +758,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('详细数据 (共 ${_dataList.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text('详细数据 (共 ${_firstLevelData.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Row(
                   children: [
                     IconButton(
@@ -789,9 +826,4 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
   }
-}
-
-/// 自定义边界约束，限制缩放范围
-class FlutterBoundaryEdges {
-  static const all = null; // 使用 InteractiveViewer 默认边界
 }
