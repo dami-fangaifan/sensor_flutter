@@ -560,7 +560,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  /// 构建可缩放的折线图（使用GestureDetector检测双指缩放）
+  // 记录上一次的缩放值
+  double _lastScale = 1.0;
+  
+  /// 构建可缩放的折线图（使用InteractiveViewer实现双指缩放）
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -568,33 +571,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
 
-    return GestureDetector(
-      onScaleStart: (details) {
-        // 记录初始缩放
-      },
-      onScaleUpdate: (details) {
-        // 使用 pointers 判断是否是双指手势
-        if (details.pointerCount >= 2) {
-          final newScale = details.scale.clamp(_minScale, _maxScale);
-          if ((newScale - _chartScale).abs() > 0.05) {
-            _chartScale = newScale;
-            if (_firstLevelData.isNotEmpty) {
-              final pointCount = _calculatePointCount(_chartScale);
-              if (_firstLevelData.length <= pointCount) {
-                _chartData = List.from(_firstLevelData);
-              } else {
-                _chartData = _sampleDataAverage(_firstLevelData, pointCount);
-              }
-              _updateYAxisRange();
-              setState(() {});
+    return InteractiveViewer(
+      minScale: _minScale,
+      maxScale: _maxScale,
+      constrained: false,
+      scaleEnabled: true,
+      panEnabled: false, // 禁用平移，只允许缩放
+      onInteractionUpdate: (details) {
+        // 检测缩放变化
+        final newScale = details.scale;
+        if ((newScale - _lastScale).abs() > 0.05) {
+          _lastScale = newScale;
+          _chartScale = newScale.clamp(_minScale, _maxScale);
+          
+          if (_firstLevelData.isNotEmpty) {
+            final pointCount = _calculatePointCount(_chartScale);
+            if (_firstLevelData.length <= pointCount) {
+              _chartData = List.from(_firstLevelData);
+            } else {
+              _chartData = _sampleDataAverage(_firstLevelData, pointCount);
             }
+            _updateYAxisRange();
+            setState(() {});
           }
         }
       },
-      onScaleEnd: (details) {
-        // 缩放结束
-      },
-      child: LineChart(
+      child: SizedBox(
+        width: 600, // 固定宽度，让图表可以被缩放
+        height: 280,
+        child: LineChart(
         LineChartData(
           gridData: FlGridData(
             show: true,
@@ -698,7 +703,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildEmptyState(String title, String subtitle) {
