@@ -196,26 +196,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
-    // 第一级采样：最多100点
+    // 第一级采样：最多100点（基于原始数据）
     _firstLevelData = _dataList.length <= _maxDisplayPoints 
         ? List.from(_dataList)
         : _sampleDataAverage(_dataList, _maxDisplayPoints);
     
-    // 第二级采样：根据用户选择的点数
+    // 第二级采样：根据用户选择的点数，在整个数据范围内取平均
     if (_firstLevelData.length <= _displayPointCount) {
       _chartData = List.from(_firstLevelData);
     } else {
       _chartData = _sampleDataAverage(_firstLevelData, _displayPointCount);
     }
     
-    // 计算Y轴范围
+    // 计算Y轴范围（基于第一级数据，保持稳定）
     _updateYAxisRange();
   }
   
   void _updateYAxisRange() {
-    if (_chartData.isEmpty) return;
+    // 使用第一级数据计算Y轴范围，这样点数变化时纵轴保持稳定
+    if (_firstLevelData.isEmpty) return;
     
-    final values = _chartData.map((d) => d.value).toList();
+    final values = _firstLevelData.map((d) => d.value).toList();
     final minVal = values.reduce(min);
     final maxVal = values.reduce(max);
     
@@ -683,15 +684,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
             dotData: FlDotData(
               show: true,
               getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
-                radius: _selectedPointIndex == index ? 6 : 4,
-                // 白色空心点，选中时绿色填充
-                color: _selectedPointIndex == index 
-                    ? const Color(0xFF27AE60) 
-                    : Colors.white,
+                // 白色空心点，选中时只改变大小，不改变颜色
+                radius: _selectedPointIndex == index ? 5 : 3,
+                color: Colors.white,
                 strokeWidth: 2,
-                strokeColor: _selectedPointIndex == index 
-                    ? const Color(0xFF27AE60) 
-                    : const Color(0xFF5E9ED6),
+                strokeColor: const Color(0xFF5E9ED6),
               ),
             ),
             belowBarData: BarAreaData(
@@ -803,9 +800,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildDetailDataCard() {
     // 使用第一级采样数据（最多100点）显示详细列表
-    final displayData = _firstLevelData.length > 20 
-        ? _firstLevelData.sublist(_firstLevelData.length - 20) 
-        : _firstLevelData;
     
     return Card(
       child: Padding(
@@ -813,28 +807,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('详细数据 (共 ${_firstLevelData.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-                      onPressed: () {},
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-                      onPressed: () {},
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            Text('详细数据 (共 ${_firstLevelData.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -850,7 +823,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ],
               ),
             ),
-            ...displayData.reversed.map((data) => _buildDataRow(data)),
+            // 可滚动列表显示全部数据
+            SizedBox(
+              height: 200, // 固定高度
+              child: ListView.builder(
+                itemCount: _firstLevelData.length,
+                itemBuilder: (context, index) {
+                  // 倒序显示，最新的在上面
+                  final data = _firstLevelData[_firstLevelData.length - 1 - index];
+                  return _buildDataRow(data);
+                },
+              ),
+            ),
           ],
         ),
       ),
