@@ -124,8 +124,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _startDate = start;
       _startTime = TimeOfDay(hour: start.hour, minute: start.minute);
       _selectedQuickRange = index;
-      // 重置缩放
-      _chartScale = 1.0;
     });
     // 自动获取数据
     if (_selectedPatient != null) {
@@ -150,7 +148,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       _chartData = [];
       _dataList = [];
       _firstLevelData = []; // 清空第一级采样数据
-      _chartScale = 1.0; // 重置缩放
     });
 
     try {
@@ -332,7 +329,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         _dataList = [];
                         _chartData = [];
                         _firstLevelData = []; // 清空第一级采样数据
-                        _chartScale = 1.0;
+                        _selectedPointIndex = null; // 清空选中状态
                         if (value != null) {
                           final patient = _patients.firstWhere((p) => p.name == value);
                           _sensorCount = patient.sensorCount;
@@ -660,7 +657,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
             }
           },
           touchTooltipData: LineTouchTooltipData(
-            showTooltipOnTap: true,
             getTooltipItems: (touchedSpots) {
               if (_selectedPointIndex == null) return [];
               return touchedSpots.map((spot) {
