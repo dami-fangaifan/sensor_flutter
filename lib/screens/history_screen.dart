@@ -39,6 +39,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   // 第一级采样后的数据（用于详细数据列表）
   List<DataModel> _firstLevelData = [];
   
+  // 详细数据列表滚动控制器
+  final ScrollController _detailScrollController = ScrollController();
+  
   // 选中的数据点索引（用于显示时间戳）
   int? _selectedPointIndex;
   
@@ -53,6 +56,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _loadPatients();
     _setQuickRange(24 * 7, 1); // 默认显示1周数据
+  }
+
+  @override
+  void dispose() {
+    _detailScrollController.dispose();
+    super.dispose();
   }
 
   void _loadPatients() {
@@ -646,17 +655,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 35,
-              interval: max(1, _chartData.length / 5),
+              reservedSize: 45,
+              interval: max(1, (_chartData.length - 1) / 5),
               getTitlesWidget: (value, meta) {
                 final index = value.toInt();
                 if (index >= 0 && index < _chartData.length) {
                   final time = _chartData[index].formattedTime;
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      time.substring(0, min(5, time.length)),
-                      style: const TextStyle(fontSize: 9, color: Colors.grey),
+                  return Transform.rotate(
+                    angle: -0.785, // -45度
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        time.substring(0, min(5, time.length)),
+                        style: const TextStyle(fontSize: 9, color: Colors.grey),
+                      ),
                     ),
                   );
                 }
@@ -799,15 +812,46 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildDetailDataCard() {
-    // 使用第一级采样数据（最多100点）显示详细列表
-    
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('详细数据 (共 ${_firstLevelData.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('详细数据 (共 ${_firstLevelData.length} 条)', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+                      onPressed: () {
+                        _detailScrollController.animateTo(
+                          0,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      },
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+                      onPressed: () {
+                        _detailScrollController.animateTo(
+                          _detailScrollController.position.maxScrollExtent,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      },
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    ),
+                  ],
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -823,14 +867,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ],
               ),
             ),
-            // 可滚动列表显示全部数据
+            // 可滚动列表显示全部数据（时间从小到大，即最早在上）
             SizedBox(
-              height: 200, // 固定高度
+              height: 200,
               child: ListView.builder(
+                controller: _detailScrollController,
                 itemCount: _firstLevelData.length,
                 itemBuilder: (context, index) {
-                  // 倒序显示，最新的在上面
-                  final data = _firstLevelData[_firstLevelData.length - 1 - index];
+                  // 从上到下时间递增：index 0 = 最早的数据
+                  final data = _firstLevelData[index];
                   return _buildDataRow(data);
                 },
               ),
