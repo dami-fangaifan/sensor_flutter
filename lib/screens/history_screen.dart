@@ -31,16 +31,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
   double _minY = 0;
   double _maxY = 100;
   
-  // 图表缩放状态
-  double _chartScale = 1.0;  // 当前缩放比例
-  static const double _minScale = 0.5;   // 最小缩放（缩小）
-  static const double _maxScale = 3.0;   // 最大缩放（放大）
-  static const int _minPoints = 10;      // 最小点数（放大时）
-  static const int _maxPoints = 100;     // 最大点数（缩小时）
-  static const int _chartDisplayPoints = 50;  // 图表显示点数（与Android一致）
+  // 采样配置
+  static const int _maxPoints = 100;     // 最大显示点数
   
   // 第一级采样后的数据（用于详细数据列表）
   List<DataModel> _firstLevelData = [];
+  
+  // 选中的数据点索引（用于显示时间戳）
+  int? _selectedPointIndex;
   
   int? _selectedQuickRange;
   
@@ -191,9 +189,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
   
-  /// 双级采样处理数据（参考Android实现）
-  /// 第一级：API数据 -> 最多100点（用于详细数据列表）
-  /// 第二级：图表显示 -> 根据缩放动态计算点数，使用平均值
+  /// 采样处理数据（参考Android实现）
+  /// API数据 -> 最多100点
   void _processChartData() {
     if (_dataList.isEmpty) {
       _chartData = [];
@@ -201,34 +198,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
       return;
     }
     
-    // 第一级采样：最多100点（用于详细列表）
+    // 采样：最多100点
     _firstLevelData = _dataList.length <= _maxPoints 
         ? List.from(_dataList)
         : _sampleDataAverage(_dataList, _maxPoints);
     
-    // 第二级采样：根据缩放计算显示点数，使用平均值
-    final pointCount = _calculatePointCount(_chartScale);
-    if (_firstLevelData.length <= pointCount) {
-      _chartData = List.from(_firstLevelData);
-    } else {
-      _chartData = _sampleDataAverage(_firstLevelData, pointCount);
-    }
+    _chartData = List.from(_firstLevelData);
     
     // 计算Y轴范围
     _updateYAxisRange();
-  }
-  
-  /// 根据缩放比例计算显示点数
-  /// 放大(scale↑) → 点数↓ → 显示更精细的时间段
-  /// 缩小(scale↓) → 点数↑ → 显示更全面的时间段
-  int _calculatePointCount(double scale) {
-    // 线性映射: scale [1.0, 3.0] → points [100, 10]
-    // scale = 1.0 → 100点
-    // scale = 2.0 → 55点
-    // scale = 3.0 → 10点
-    final normalizedScale = (scale - 1.0) / (_maxScale - 1.0); // 0.0 ~ 1.0
-    final pointCount = (_maxPoints - normalizedScale * (_maxPoints - _minPoints)).round();
-    return pointCount.clamp(_minPoints, _maxPoints);
   }
   
   void _updateYAxisRange() {
@@ -540,7 +518,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '双指缩放：外张→放大→细节 | 内捏→缩小→概览',
+              '左右滑动查看图表 | 点击数据点显示详情',
               style: TextStyle(fontSize: 10, color: Colors.grey[500]),
             ),
             const SizedBox(height: 12),
@@ -560,29 +538,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  /// 构建可缩放的折线图（使用GestureDetector + Transform.scale）
+  /// 构建可横向滚动的折线图
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
     for (int i = 0; i < _chartData.length; i++) {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
+    
+    // 计算图表宽度：每个点30像素，最少占满屏幕
+    final chartWidth = max(350.0, _chartData.length * 30.0);
 
-    return GestureDetector(
-      onScaleUpdate: (ScaleUpdateDetails details) {
-        final newScale = details.scale.clamp(_minScale, _maxScale);
-        if ((newScale - _chartScale).abs() > 0.02) {
-          setState(() {
-            _chartScale = newScale;
-          });
-        }
-      },
-      onScaleEnd: (ScaleEndDetails details) {
-        // 缩放结束，可根据需要添加逻辑
-      },
-      child: Transform.scale(
-        scale: _chartScale,
-        alignment: Alignment.center,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: chartWidth,
+        height: 280,
         child: _buildChartContent(spots),
       ),
     );
@@ -652,10 +623,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
             color: const Color(0xFF5E9ED6),
             barWidth: 2.5,
             dotData: FlDotData(
-              show: _chartData.length <= 30,
+              show: true,
               getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
-                radius: 4,
-                color: const Color(0xFF5E9ED6),
+                radius: _selectedPointIndex == index ? 6 : 4,
+                color: _selectedPointIndex == index 
+                    ? const Color(0xFF27AE60) 
+                    : const Color(0xFF5E9ED6),
                 strokeWidth: 2,
                 strokeColor: Colors.white,
               ),
@@ -675,11 +648,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ],
         lineTouchData: LineTouchData(
           enabled: true,
+          touchCallback: (FlTouchEvent event, LineTouchResponse? response) {
+            if (event is FlTapUpEvent || event is FlPanDownEvent) {
+              if (response != null && response.lineBarSpots != null && response.lineBarSpots!.isNotEmpty) {
+                final index = response.lineBarSpots!.first.x.toInt();
+                setState(() {
+                  // 点击同一个点则取消选中，否则选中新点
+                  _selectedPointIndex = _selectedPointIndex == index ? null : index;
+                });
+              }
+            }
+          },
           touchTooltipData: LineTouchTooltipData(
+            showTooltipOnTap: true,
             getTooltipItems: (touchedSpots) {
+              if (_selectedPointIndex == null) return [];
               return touchedSpots.map((spot) {
                 final index = spot.x.toInt();
-                if (index >= 0 && index < _chartData.length) {
+                if (index >= 0 && index < _chartData.length && index == _selectedPointIndex) {
                   final data = _chartData[index];
                   return LineTooltipItem(
                     '${data.timestamp}\n${data.value.toStringAsFixed(2)} kPa',
@@ -690,6 +676,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
               }).toList();
             },
           ),
+        ),
+        extraLinesData: ExtraLinesData(
+          extraLinesOnTop: true,
+          horizontalLines: [],
+          verticalLines: _selectedPointIndex != null && _selectedPointIndex! < _chartData.length
+              ? [
+                  VerticalLine(
+                    x: _selectedPointIndex!.toDouble(),
+                    color: const Color(0xFF5E9ED6).withOpacity(0.5),
+                    strokeWidth: 1,
+                    dashArray: [4, 4],
+                  ),
+                ]
+              : [],
         ),
       ),
     );
