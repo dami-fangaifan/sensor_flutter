@@ -588,7 +588,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       maxScale: _maxScale,
       initialScale: 1.0,
       enableRotation: false,
-      strictScale: true,
       onScaleEnd: (context, details, controller) {
         final newScale = controller.scale ?? 1.0;
         _chartScale = newScale.clamp(_minScale, _maxScale);
