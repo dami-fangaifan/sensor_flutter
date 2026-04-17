@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:photo_view/photo_view.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/session_service.dart';
@@ -53,6 +54,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _loadPatients();
     _setQuickRange(24 * 7, 1); // 默认显示1周数据
+  }
+
+  @override
+  void dispose() {
+    _photoViewController.dispose();
+    super.dispose();
   }
 
   void _loadPatients() {
@@ -560,10 +567,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  // 记录上一次的缩放值
-  double _lastScale = 1.0;
+  // PhotoView 控制器
+  final PhotoViewController _photoViewController = PhotoViewController();
   
-  /// 构建可缩放的折线图（使用InteractiveViewer实现双指缩放）
+  /// 构建可缩放的折线图（使用PhotoView实现双指缩放）
   Widget _buildLineChart() {
     // 生成数据点
     final spots = <FlSpot>[];
@@ -571,36 +578,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
       spots.add(FlSpot(i.toDouble(), _chartData[i].value));
     }
 
-    return InteractiveViewer(
+    return PhotoView.customChild(
+      controller: _photoViewController,
+      child: Container(
+        color: Colors.white,
+        child: _buildChartContent(spots),
+      ),
       minScale: _minScale,
       maxScale: _maxScale,
-      constrained: false,
-      scaleEnabled: true,
-      panEnabled: false, // 禁用平移，只允许缩放
-      onInteractionUpdate: (details) {
-        // 检测缩放变化
-        final newScale = details.scale;
-        if ((newScale - _lastScale).abs() > 0.05) {
-          _lastScale = newScale;
-          _chartScale = newScale.clamp(_minScale, _maxScale);
-          
-          if (_firstLevelData.isNotEmpty) {
-            final pointCount = _calculatePointCount(_chartScale);
-            if (_firstLevelData.length <= pointCount) {
-              _chartData = List.from(_firstLevelData);
-            } else {
-              _chartData = _sampleDataAverage(_firstLevelData, pointCount);
-            }
-            _updateYAxisRange();
-            setState(() {});
+      initialScale: 1.0,
+      enableRotation: false,
+      strictScale: true,
+      onScaleEnd: (context, details, controller) {
+        final newScale = controller.scale ?? 1.0;
+        _chartScale = newScale.clamp(_minScale, _maxScale);
+        
+        if (_firstLevelData.isNotEmpty) {
+          final pointCount = _calculatePointCount(_chartScale);
+          if (_firstLevelData.length <= pointCount) {
+            _chartData = List.from(_firstLevelData);
+          } else {
+            _chartData = _sampleDataAverage(_firstLevelData, pointCount);
           }
+          _updateYAxisRange();
+          setState(() {});
         }
       },
-      child: SizedBox(
-        width: 600, // 固定宽度，让图表可以被缩放
-        height: 280,
-        child: LineChart(
-        LineChartData(
+    );
+  }
+  
+  /// 构建图表内容
+  Widget _buildChartContent(List<FlSpot> spots) {
+    return LineChart(
+      LineChartData(
           gridData: FlGridData(
             show: true,
             drawVerticalLine: true,
@@ -703,8 +713,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   Widget _buildEmptyState(String title, String subtitle) {
